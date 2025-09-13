@@ -1,0 +1,91 @@
+# ------------------------
+# Python
+# ------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+*.manifest
+*.spec
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+*.sqlite3
+
+# Byte-compiled / cache
+*.log
+*.pot
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# ------------------------
+# Environment & Config
+# ------------------------
+# Local env files
+.env.local
+.env.dev
+.env.prod
+.env.test
+.env.*
+
+# Supabase configs
+.supabase/
+.supabase-env
+
+# ------------------------
+# OS / Editor files
+# ------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# ------------------------
+# Docker
+# ------------------------
+docker-compose.override.yml
+.docker/
+*.pid
+*.seed
+
+# ------------------------
+# Testing
+# ------------------------
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+tests/__pycache__/
+
+# ------------------------
+# Node (if frontend added)
+# ------------------------
+node_modules/
+npm-debug.log
+yarn-error.log
+.pnpm-debug.log
