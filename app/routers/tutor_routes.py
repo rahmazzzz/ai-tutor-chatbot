@@ -1,46 +1,62 @@
 # app/routers/tutor_routes.py
+import logging
 from fastapi import APIRouter, UploadFile, File, Depends
 from sqlalchemy.orm import Session
 from app.deps import get_current_user
-from app.services.file_processing import FileProcessingService
-from app.services.embedding_service import EmbeddingService
-from app.services.storage_service import StorageService
-from app.services.rag_service import RAGService
+from app.container.core_container import FileProcessingContainer, EmbeddingContainer, StorageContainer, RAGContainer
 from app.clients.supabase_client import get_db  # <-- import here
+
+# Configure logger
+logger = logging.getLogger("tutor_routes")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
 
 router = APIRouter(prefix="/tutor", tags=["Tutor"])
 
-file_processor = FileProcessingService()
-embedding_service = EmbeddingService()
-storage_service = StorageService()
+# Initialize containers
+file_processor_container = FileProcessingContainer()
+embedding_container = EmbeddingContainer()
+storage_container = StorageContainer()
 
 
 @router.post("/upload")
 def upload_and_embed(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),   # <-- inject db
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    logger.info(f"Uploading file '{file.filename}' for user {current_user['sub']}")
     file_bytes = file.file.read()
     file_path = f"{current_user['sub']}/{file.filename}"
 
-    storage_service.upload_file(
+    # Upload file to storage
+    storage_container.service.upload_file(
         bucket="user-files",
         file_path=file_path,
         file_content=file_bytes,
         token=current_user.get("token")
     )
+    logger.info(f"File '{file.filename}' uploaded successfully")
 
-    text = file_processor.extract_text_from_pdf(file_bytes)
-    chunks = file_processor.chunk_text(text)
+    # Extract and chunk text
+    text = file_processor_container.service.extract_text_from_pdf(file_bytes)
+    chunks = file_processor_container.service.chunk_text(text)
+    logger.info(f"Extracted and chunked text into {len(chunks)} chunks")
 
-    embedding_service.create_and_store_embeddings(
-        db=db,  # <-- use db session
+    # Create embeddings
+    embedding_container.service.create_and_store_embeddings(
+        db=db,
         user_id=current_user["sub"],
         filename=file.filename,
         file_path=file_path,
         chunks=chunks
     )
+    logger.info(f"Embeddings stored for file '{file.filename}'")
 
     return {"message": "File uploaded and embeddings stored", "num_chunks": len(chunks)}
 
@@ -48,9 +64,16 @@ def upload_and_embed(
 @router.post("/ask")
 def ask_question(
     question: str,
-    db: Session = Depends(get_db),   # <-- inject db
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    rag_service = RAGService(db)  # <-- give db to RAGService
-    answer = rag_service.ask_question(question=question)
+    logger.info(f"User {current_user['sub']} asking question: {question}")
+    
+    # Instantiate RAG service (via your container if you have one)
+    rag_container = RAGContainer(db)
+    
+    # Use the new chat method which handles memory
+    answer = rag_container.service.chat(user_input=question, user_id=current_user['sub'])
+    
+    logger.info(f"Answer generated: {answer}")
     return {"answer": answer}

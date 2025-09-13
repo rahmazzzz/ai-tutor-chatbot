@@ -1,58 +1,69 @@
-# app/routers/auth_routes.py
-from fastapi import APIRouter, Depends, HTTPException, status
+# app/routes/auth_routes.py
+import logging
+from fastapi import APIRouter, Depends, HTTPException
 from app.schemas.user_schema import UserCreate, UserOut
 from app.schemas.auth import LoginRequest, AuthResponse
-from app.services.auth_service import AuthService
 from app.deps import get_current_user
-import logging
+from app.container.core_container import AuthContainer
 
-router = APIRouter(prefix="/auth", tags=["auth"])
-auth_service = AuthService()
+# Configure logger
 logger = logging.getLogger("auth_routes")
-logging.basicConfig(level=logging.INFO)
+logger.setLevel(logging.INFO)
+
+# Optional: add console handler if not configured globally
+if not logger.handlers:
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
+# Set the prefix here to avoid double "/auth" when including in main.py
+router = APIRouter(prefix="/auth", tags=["Authentication"])
+auth_container = AuthContainer()
 
 
 @router.post("/register", response_model=UserOut)
 async def register(user: UserCreate):
-    logger.info(f"Register request received for email: {user.email}, username: {user.username}")
+    """
+    Register a new user.
+    """
+    logger.info(f"Attempting to register user: {user.email}")
     try:
-        result = await auth_service.register(
+        result = await auth_container.service.register(
             email=user.email,
             password=user.password,
             username=user.username
         )
-        logger.info(f"User registered successfully: {getattr(result, 'email', None)}")
+        logger.info(f"User registered successfully: {user.email}")
         return result
     except Exception as e:
-        logger.error(f"Unexpected error during registration for {user.email}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        logger.error(f"Error registering user {user.email}: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/login", response_model=AuthResponse)
 async def login(request: LoginRequest):
-    logger.info(f"Login request received for email: {request.email}")
+    """
+    Login and get JWT token.
+    """
+    logger.info(f"Login attempt for user: {request.email}")
     try:
-        result = await auth_service.login(
+        result = await auth_container.service.login(
             email=request.email,
             password=request.password
         )
-
-        # Use getattr to avoid crashes if user/email is missing
-        user_email = getattr(result.user, "email", "unknown")
-        logger.info(f"User logged in successfully: {user_email}")
-
+        logger.info(f"User logged in successfully: {request.email}")
         return result
     except Exception as e:
-        logger.error(f"Login failed for {request.email}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
-        )
+        logger.error(f"Login failed for user {request.email}: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/me", response_model=UserOut)
 async def read_current_user(current_user: UserOut = Depends(get_current_user)):
+    """
+    Get the current logged-in user.
+    """
+    logger.info(f"Fetching current user info: {current_user.email}")
     return current_user
