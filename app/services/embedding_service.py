@@ -1,3 +1,4 @@
+# app/services/embedding_service.py
 import requests
 import logging
 from sqlalchemy.orm import Session

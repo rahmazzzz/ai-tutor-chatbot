@@ -3,7 +3,9 @@ import logging
 from sqlalchemy import create_engine
 from app.models.base import Base
 from app.models.embedding import Embedding  # 👈 ensures table gets registered
-from app.models.file import UploadedFile    # 👈 ensures table gets registered
+from app.models.file import UploadedFile  
+from app.models.chat_history import ChatHistory# 👈 ensures table gets registered
+from app.models.user import User
 from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
