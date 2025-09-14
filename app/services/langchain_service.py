@@ -1,24 +1,49 @@
 # app/services/langchain_service.py
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.chains.summarize import load_summarize_chain
-from langchain.chat_models import ChatOpenAI
+import aiohttp
+from langchain.prompts import ChatPromptTemplate
+from langchain.schema import HumanMessage
+from app.core.config import settings
 
-async def summarize_lessons(lessons: list):
+class MistralService:
     """
-    Summarizes internal lessons to short coherent descriptions using LangChain.
+    Service to interact with Mistral LLM using async HTTP requests.
+    Uses LangChain's ChatPromptTemplate for structured prompts.
     """
-    summarized = []
-    llm = ChatOpenAI(temperature=0, model_name="gpt-4")
-    chain = load_summarize_chain(llm, chain_type="map_reduce")
+    def __init__(self):
+        self.api_url = "https://api.mistral.ai/v1/chat/completions"
+        self.model = settings.MISTRAL_MODEL
+        self.api_key = settings.MISTRAL_API_KEY
+        self.temperature = settings.MISTRAL_TEMPERATURE
 
-    for lesson in lessons:
-        text = lesson.get("content", lesson.get("title", ""))
-        summary = chain.run(text)
-        summarized.append({
-            "id": lesson["id"],
-            "title": lesson["title"],
-            "summary": summary,
-            "type": lesson.get("type", "pdf"),
-            "difficulty": lesson.get("difficulty", 1)
-        })
-    return summarized
+    async def summarize_lessons(self, lessons: list[str]) -> str:
+        """
+        Summarize a list of lessons using Mistral LLM.
+        """
+        # Build prompt using LangChain
+        prompt_template = ChatPromptTemplate.from_template(
+            "Summarize the following lessons concisely and clearly:\n{lessons}"
+        )
+        prompt_text = prompt_template.format(lessons="\n".join(lessons))
+
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You are a helpful AI assistant that summarizes lessons."},
+                {"role": "user", "content": prompt_text}
+            ],
+            "temperature": self.temperature
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                self.api_url,
+                json=payload,
+                headers={"Authorization": f"Bearer {self.api_key}"}
+            ) as response:
+                if response.status != 200:
+                    text = await response.text()
+                    raise Exception(f"Mistral API error {response.status}: {text}")
+                data = await response.json()
+        
+        # Extract content from Mistral response
+        return data["choices"][0]["message"]["content"]
