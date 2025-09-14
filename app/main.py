@@ -45,6 +45,7 @@ app.add_middleware(
 app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 app.include_router(tutor_routes.router)  # /tutor prefix already defined in router
 app.include_router(agent_router, prefix="/agent", tags=["Agent"])
+app.include_router(agent_router, prefix="/agent", tags=["Lesson Planner"])
 # --------------------------
 # Entry point for running with `python -m app.main`
 # --------------------------
