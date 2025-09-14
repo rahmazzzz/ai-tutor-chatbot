@@ -32,3 +32,4 @@ pytest
 email-validator
 postgrest
 pgvector
+langchain-tavily

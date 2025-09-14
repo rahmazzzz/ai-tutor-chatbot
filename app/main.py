@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.models.base import Base
 from app.routers import auth_routes, tutor_routes
+from app.routers.agent_route import router as agent_router
 
 # --------------------------
 # Database setup (SQLAlchemy)
@@ -43,7 +44,7 @@ app.add_middleware(
 # --------------------------
 app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
 app.include_router(tutor_routes.router)  # /tutor prefix already defined in router
-
+app.include_router(agent_router, prefix="/agent", tags=["Agent"])
 # --------------------------
 # Entry point for running with `python -m app.main`
 # --------------------------
