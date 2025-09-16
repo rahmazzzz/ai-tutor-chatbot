@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 from app.deps import get_current_user
 from app.container.core_container import FileProcessingContainer, EmbeddingContainer, StorageContainer, RAGContainer
 from app.clients.supabase_client import get_db  # <-- import here
-
+from app.services.summarize_video import summarize_video_service
+from pydantic import BaseModel
 # Configure logger
 logger = logging.getLogger("tutor_routes")
 logger.setLevel(logging.INFO)
@@ -22,7 +23,8 @@ router = APIRouter(prefix="/tutor", tags=["Tutor"])
 file_processor_container = FileProcessingContainer()
 embedding_container = EmbeddingContainer()
 storage_container = StorageContainer()
-
+class VideoLink(BaseModel):
+    url: str
 
 @router.post("/upload")
 def upload_and_embed(
@@ -77,3 +79,13 @@ def ask_question(
     
     logger.info(f"Answer generated: {answer}")
     return {"answer": answer}
+
+
+
+@router.post("/summarize_video")
+def summarize_video(data: VideoLink, user=Depends(get_current_user)):
+    summary = summarize_video_service(data.url)
+    return {
+        "url": data.url,
+        "summary": summary
+    }
