@@ -1,4 +1,3 @@
-# app/utils/youtube_search.py
 from youtubesearchpython import VideosSearch
 
 class YouTubeSearch:
@@ -6,10 +5,6 @@ class YouTubeSearch:
         self.max_results = max_results
 
     def search(self, query: str):
-        """
-        Search YouTube for videos based on a query.
-        Returns a list of video dicts with title, url, description, and thumbnail.
-        """
         videos_search = VideosSearch(query, limit=self.max_results)
         results = videos_search.result().get("result", [])
 

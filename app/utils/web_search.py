@@ -19,7 +19,7 @@ async def search_web(query: str, max_results: int = 5):
     results = await tavily_search.arun(query)
 
     # Print/log the raw results to see what we actually got
-    print("Raw TavilySearch results:", results)
+    #print("Raw TavilySearch results:", results)
 
     # If it's a dict with 'results' key, use that
     if isinstance(results, dict) and "results" in results:

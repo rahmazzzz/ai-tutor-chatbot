@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     TAVILY_API_KEY: str = None
     MISTRAL_MODEL: str = "magistral-medium-2507"
     MISTRAL_TEMPERATURE: float = 0.7 
+    GEMINI_API_KEY: str 
     class Config:
         from_attributes = True
         env_file = ".env"
