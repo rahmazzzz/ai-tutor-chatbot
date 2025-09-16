@@ -2,10 +2,11 @@
 import requests
 import logging
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Tuple
 
 from app.models.file import UploadedFile
 from app.models.embedding import Embedding
+from app.repositories.embedding_repository import EmbeddingRepository
 from app.exceptions.base_exceptions import ExternalServiceError, ValidationError
 from app.core.config import settings
 
@@ -14,10 +15,13 @@ logger.setLevel(logging.INFO)
 
 
 class EmbeddingService:
-    def __init__(self):
+    def __init__(self, db: Session):
         self.api_key = settings.MISTRAL_API_KEY
         if not self.api_key:
             raise ExternalServiceError("MISTRAL_API_KEY not set in settings")
+
+        # Inject repository (unit-test friendly)
+        self.embedding_repo = EmbeddingRepository(db)
 
         # Mistral embeddings endpoint
         self.api_url = "https://api.mistral.ai/v1/embeddings"
@@ -34,7 +38,7 @@ class EmbeddingService:
 
         payload = {
             "model": self.model_name,
-            "input": inputs,   
+            "input": inputs,
         }
         try:
             logger.info(f"Requesting embeddings from Mistral for {len(inputs)} inputs")
@@ -80,39 +84,19 @@ class EmbeddingService:
 
     def create_and_store_embeddings(
         self,
-        db: Session,
         user_id: str,
         filename: str,
         file_path: str,
         chunks: List[str],
-    ):
-        """Generate embeddings via Mistral, then store file + embeddings in DB."""
+    ) -> Tuple[UploadedFile, List[List[float]]]:
+        """
+        Generate embeddings via Mistral, then delegate storage to repository.
+        """
         embeddings = self.create_embeddings(chunks)
-
-        try:
-            file_entry = UploadedFile(
-                user_id=user_id, filename=filename, file_path=file_path
-            )
-            db.add(file_entry)
-            db.commit()
-            db.refresh(file_entry)
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to store uploaded file {filename}: {e}")
-            raise ValidationError(f"Failed to store uploaded file: {e}")
-
-        try:
-            for chunk, vector in zip(chunks, embeddings):
-                emb_obj = Embedding(
-                    file_id=file_entry.id,
-                    content_chunk=chunk,
-                    embedding_vector=vector,
-                )
-                db.add(emb_obj)
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to store embeddings for {filename}: {e}")
-            raise ValidationError(f"Failed to store embeddings: {e}")
-
-        return file_entry, embeddings
+        return self.embedding_repo.store_file_and_embeddings(
+            user_id=user_id,
+            filename=filename,
+            file_path=file_path,
+            chunks=chunks,
+            embeddings=embeddings,
+        )
