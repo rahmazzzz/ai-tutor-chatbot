@@ -10,6 +10,6 @@ class Embedding(Base):
     id = Column(Integer, primary_key=True, index=True)
     file_id = Column(Integer, ForeignKey("uploaded_files.id"))
     content_chunk = Column(String, nullable=False)
-    embedding_vector = Column(VECTOR(1024))  # pgvector-compatible
+    embedding_vector = Column(VECTOR(1536))  # pgvector-compatible
 
     file = relationship("UploadedFile", back_populates="embeddings")
