@@ -4,9 +4,9 @@ import logging
 import numpy as np
 from sqlalchemy.orm import Session
 from app.services.embedding_service import EmbeddingService
-from app.models.embedding import Embedding
-from app.models.file import UploadedFile
-from app.models.chat_history import ChatHistory
+from app.repositories.embedding_repository import EmbeddingRepository
+from app.repositories.file_repository import FileRepository
+from app.repositories.chat_history_repository import ChatHistoryRepository
 from app.exceptions.base_exceptions import ExternalServiceError
 from app.core.config import settings
 import requests
@@ -18,8 +18,8 @@ logger.setLevel(logging.INFO)
 class SQLAlchemyRetriever:
     """Retriever that fetches top-k similar documents from Postgres using pgvector."""
 
-    def __init__(self, db: Session, embedding_service: EmbeddingService, top_k: int = 5):
-        self.db = db
+    def __init__(self, embedding_repo: EmbeddingRepository, embedding_service: EmbeddingService, top_k: int = 5):
+        self.embedding_repo = embedding_repo
         self.embedding_service = embedding_service
         self.top_k = top_k
 
@@ -28,13 +28,7 @@ class SQLAlchemyRetriever:
         query_vector = np.array(self.embedding_service.embed_query(query), dtype=np.float32)
 
         try:
-            results = (
-                self.db.query(Embedding)
-                .join(UploadedFile)
-                .order_by(Embedding.embedding_vector.cosine_distance(query_vector))
-                .limit(self.top_k)
-                .all()
-            )
+            results = self.embedding_repo.get_top_k_similar(query_vector, self.top_k)
             return [e.content_chunk for e in results]
         except Exception as e:
             logger.exception("Failed to fetch relevant documents")
@@ -42,10 +36,15 @@ class SQLAlchemyRetriever:
 
 
 class RAGService:
-    def __init__(self, db: Session, top_k: int = 5, memory_size: int = 7):
+    def __init__(self, db: Session,embedding_service: EmbeddingService,embedding_repo: EmbeddingRepository,
+                 file_repo: FileRepository,chat_repo: ChatHistoryRepository,top_k: int = 5, memory_size: int = 7):
         self.db = db
-        self.embedding_service = EmbeddingService()
-        self.retriever = SQLAlchemyRetriever(db, self.embedding_service, top_k)
+        self.embedding_service = EmbeddingService(db)
+        self.embedding_repo = EmbeddingRepository(db)
+        self.file_repo = FileRepository(db)
+        self.chat_repo = ChatHistoryRepository(db)
+
+        self.retriever = SQLAlchemyRetriever(self.embedding_repo, self.embedding_service, top_k)
         self.memory_size = memory_size  # last N messages
         self.api_key = settings.MISTRAL_API_KEY
         self.api_url = "https://api.mistral.ai/v1/chat/completions"
@@ -73,20 +72,13 @@ class RAGService:
 
         return data["choices"][0]["message"]["content"].strip()
 
-    def chat(self, user_input: str, user_id: int) -> str:
+    def chat(self, user_input: str, user_id: str) -> str:
         """Main method to handle chat with memory and retrieval."""
         if not user_input.strip():
             raise ValueError("Input cannot be empty")
 
         # 1. Fetch last N chat messages for user
-        past_messages = (
-            self.db.query(ChatHistory)
-            .filter(ChatHistory.user_id == user_id)
-            .order_by(ChatHistory.created_at.desc())
-            .limit(self.memory_size)
-            .all()
-        )
-        past_messages = past_messages[::-1]  # chronological order
+        past_messages = self.chat_repo.get_last_n_messages(user_id, self.memory_size)
 
         # 2. Build chat context from messages
         chat_context = "\n".join([f"{msg.role}: {msg.message}" for msg in past_messages])
@@ -97,17 +89,16 @@ class RAGService:
         doc_context = "\n\n".join(docs) if docs else "No context found."
 
         # 4. Combine document context + chat memory
-        prompt = f"Answer the question based on the following context and previous conversation:\n\n"
-        prompt += f"Documents:\n{doc_context}\n\nConversation:\n{chat_context}\n\nAnswer:"
+        prompt = (
+            f"Answer the question based on the following context and previous conversation:\n\n"
+            f"Documents:\n{doc_context}\n\nConversation:\n{chat_context}\n\nAnswer:"
+        )
 
         # 5. Call LLM
         response = self._call_llm(prompt)
 
-        # 6. Save user input and AI response to chat history
-        self.db.add_all([
-            ChatHistory(user_id=user_id, role="user", message=user_input),
-            ChatHistory(user_id=user_id, role="assistant", message=response)
-        ])
-        self.db.commit()
+        # 6. Save user input and AI response to chat history via repo
+        self.chat_repo.save_message(user_id=user_id, role="user", message=user_input)
+        self.chat_repo.save_message(user_id=user_id, role="assistant", message=response)
 
         return response
