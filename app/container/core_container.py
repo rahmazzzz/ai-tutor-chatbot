@@ -14,7 +14,7 @@ from app.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthService
 from app.services.embedding_service import EmbeddingService
 from app.services.file_processing import FileProcessingService
-from app.services.langchain_service import MistralService
+from app.services.langchain_service import LangChainLLMService
 from app.services.rag_service import RAGService
 from app.services.sql_rag_service import SQLRAGService
 from app.services.storage_service import StorageService
@@ -38,7 +38,7 @@ user_repo = UserRepository(db_session)
 auth_service = AuthService()
 embedding_service = EmbeddingService(db_session)
 file_processing_service = FileProcessingService()
-mistral_service = MistralService()
+mistral_service = LangChainLLMService()
 rag_service = RAGService(
     db=db_session,
     embedding_service=embedding_service,

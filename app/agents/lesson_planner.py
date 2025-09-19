@@ -2,7 +2,7 @@
 from app.services.user_progress_service import UserProgressService
 from app.utils.web_search import search_web
 from app.utils.youtube_search import YouTubeSearch
-from app.services.langchain_service import MistralService
+from app.services.langchain_service import LangChainLLMService
 
 class LessonPlannerAgent:
     """
@@ -16,7 +16,7 @@ class LessonPlannerAgent:
         self.progress = UserProgressService()
         self.max_results = max_results
         self.youtube_searcher = YouTubeSearch(max_results=max_results)
-        self.mistral = MistralService()
+        self.mistral = LangChainLLMService()
 
     async def plan_lesson_for_topic(self, user_id: str, topic: str):
         # 1️⃣ User profile and progress
