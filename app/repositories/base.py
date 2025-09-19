@@ -3,6 +3,7 @@ from typing import TypeVar, Generic, Type, Optional, List, Dict, Any, Union
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import DeclarativeMeta
 
+
 # T is any SQLAlchemy model inheriting from DeclarativeMeta
 T = TypeVar("T", bound=DeclarativeMeta)
 
