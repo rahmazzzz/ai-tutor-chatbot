@@ -1,49 +1,77 @@
 # app/services/langchain_service.py
 import aiohttp
+import cohere
 from langchain.prompts import ChatPromptTemplate
-from langchain.schema import HumanMessage
 from app.core.config import settings
 
-class MistralService:
+
+class LangChainLLMService:
     """
-    Service to interact with Mistral LLM using async HTTP requests.
-    Uses LangChain's ChatPromptTemplate for structured prompts.
+    Unified LLM service with primary Mistral support and Cohere fallback.
     """
+
     def __init__(self):
-        self.api_url = "https://api.mistral.ai/v1/chat/completions"
-        self.model = settings.MISTRAL_MODEL
-        self.api_key = settings.MISTRAL_API_KEY
-        self.temperature = settings.MISTRAL_TEMPERATURE
+        # --- Mistral setup ---
+        self.mistral_api_url = "https://api.mistral.ai/v1/chat/completions"
+        self.mistral_model = settings.MISTRAL_MODEL
+        self.mistral_api_key = settings.MISTRAL_API_KEY
+        self.mistral_temperature = settings.MISTRAL_TEMPERATURE
+
+        # --- Cohere setup ---
+        self.cohere_client = cohere.ClientV2(api_key=settings.COHERE_API_KEY)
+        self.cohere_model = "command-a-03-2025"
 
     async def summarize_lessons(self, lessons: list[str]) -> str:
         """
-        Summarize a list of lessons using Mistral LLM.
+        Summarize a list of lessons using Mistral first,
+        fallback to Cohere on failure (e.g., 429 rate limit).
         """
-        # Build prompt using LangChain
-        prompt_template = ChatPromptTemplate.from_template(
-            "Summarize the following lessons concisely and clearly:\n{lessons}"
+        summary_prompt = (
+            "Summarize the following lessons concisely and clearly:\n"
+            + "\n".join(lessons)
         )
-        prompt_text = prompt_template.format(lessons="\n".join(lessons))
 
-        payload = {
-            "model": self.model,
+        # ---------- Try Mistral ----------
+        mistral_payload = {
+            "model": self.mistral_model,
             "messages": [
-                {"role": "system", "content": "You are a helpful AI assistant that summarizes lessons."},
-                {"role": "user", "content": prompt_text}
+                {
+                    "role": "system",
+                    "content": "You are a helpful AI assistant that summarizes lessons.",
+                },
+                {"role": "user", "content": summary_prompt},
             ],
-            "temperature": self.temperature
+            "temperature": self.mistral_temperature,
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self.api_url,
-                json=payload,
-                headers={"Authorization": f"Bearer {self.api_key}"}
-            ) as response:
-                if response.status != 200:
-                    text = await response.text()
-                    raise Exception(f"Mistral API error {response.status}: {text}")
-                data = await response.json()
-        
-        # Extract content from Mistral response
-        return data["choices"][0]["message"]["content"]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.mistral_api_url,
+                    json=mistral_payload,
+                    headers={"Authorization": f"Bearer {self.mistral_api_key}"},
+                ) as response:
+                    if response.status != 200:
+                        text = await response.text()
+                        # Trigger fallback on rate limit
+                        if response.status == 429:
+                            raise RuntimeError(f"Mistral rate limit: {text}")
+                        raise Exception(f"Mistral API error {response.status}: {text}")
+
+                    data = await response.json()
+                    return data["choices"][0]["message"]["content"]
+
+        except Exception as e:
+            # ---------- Fallback to Cohere ----------
+            print(f"[LangChainLLMService] Falling back to Cohere due to: {e}")
+            cohere_response = self.cohere_client.chat(
+                model=self.cohere_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful AI assistant that summarizes lessons.",
+                    },
+                    {"role": "user", "content": summary_prompt},
+                ],
+            )
+            return cohere_response.message.content[0].text
