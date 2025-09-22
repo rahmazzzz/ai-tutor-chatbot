@@ -8,7 +8,9 @@ class Settings(BaseSettings):
 
     # HuggingFace
     HF_API_TOKEN: str
-
+    ELEVENLABS_API_KEY: str
+    VOICE_NAME: str    # default voice
+    ELEVENLABS_MODEL: str = "eleven_multilingual_v2"  # multilingual model
     GOOGLE_API_KEY: str
     # JWT
     JWT_SECRET: str
