@@ -1,5 +1,6 @@
+# app/routers/auth_routes.py
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.schemas.user_schema import UserCreate, UserOut
 from app.schemas.auth import LoginRequest, AuthResponse
 from app.deps import get_current_user
@@ -17,7 +18,9 @@ if not logger.handlers:
     ch.setFormatter(formatter)
     logger.addHandler(ch)
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+# NOTE: no duplicate "auth" here — main.py already includes the router directly
+router = APIRouter(prefix="/auth", tags=["Auth"])
+
 auth_service = container.auth_service  # directly use service from container
 
 
@@ -31,7 +34,7 @@ async def register(user: UserCreate):
         result = await auth_service.register(
             email=user.email,
             password=user.password,
-            username=user.username
+            username=user.username,
         )
         logger.info(f"User registered successfully: {user.email}")
         return result
@@ -49,7 +52,7 @@ async def login(request: LoginRequest):
     try:
         result = await auth_service.login(
             email=request.email,
-            password=request.password
+            password=request.password,
         )
         logger.info(f"User logged in successfully: {request.email}")
         return result
@@ -59,7 +62,7 @@ async def login(request: LoginRequest):
 
 
 @router.get("/me", response_model=UserOut)
-async def read_current_user(current_user: UserOut = get_current_user):
+async def read_current_user(current_user: UserOut = Depends(get_current_user)):
     """
     Get the current logged-in user.
     """

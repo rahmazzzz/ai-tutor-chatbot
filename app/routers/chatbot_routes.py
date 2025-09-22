@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.deps import get_current_user
 from app.clients.supabase_client import get_db
 from app.graph.langgraph_chatbot import ChatbotGraph
-from app.services.chatbot_service import ChatbotService
+from app.agents.chatbot_agent import ChatbotService
 
 router = APIRouter(prefix="/chatbot", tags=["Chatbot"])
 

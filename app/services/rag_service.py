@@ -1,5 +1,4 @@
 # app/services/rag_service.py
-
 import logging
 import numpy as np
 from sqlalchemy.orm import Session

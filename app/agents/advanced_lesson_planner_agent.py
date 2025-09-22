@@ -24,11 +24,11 @@ class AdvancedLessonPlannerAgent:
         Plan lessons for a given topic.
         `minutes_per_task` defines the duration for each lesson/task.
         """
-        # 1️⃣ Get user profile and completed lessons
+        #  Get user profile and completed lessons
         profile = self.progress.get_user_profile(user_id)
         completed = self.progress.get_completed_lessons(user_id)
 
-        # 2️⃣ Internal lessons (mock example, replace with embeddings search later)
+        #  Internal lessons (mock example, replace with embeddings search later)
         lessons = [
             {
                 "id": f"{topic}_{i}",
@@ -46,11 +46,11 @@ class AdvancedLessonPlannerAgent:
             key=lambda x: abs(x['difficulty'] - profile['skill_level'])
         )[:self.max_results]
 
-        # 3️⃣ External searches
+        #  External searches
         web_links = await search_web(topic, max_results=self.max_results)
         youtube_videos = self.youtube_searcher.search(topic)
 
-        # 4️⃣ Summarize internal lessons using MistralService
+        #  Summarize internal lessons using MistralService
         lesson_texts = [l["content"] for l in ranked_internal]
         summarized_lessons = await self.llm.summarize_lessons(lesson_texts)
         
@@ -58,7 +58,7 @@ class AdvancedLessonPlannerAgent:
             lesson_summary = await self.llm.summarize_lessons([lesson["content"]])
             lesson["summary"] = [{"type": "text", "text": lesson_summary}]
 
-        # 5️⃣ Compile final lesson plan
+        #  Compile final lesson plan
         plan = {
             "topic": topic,
             "internal_lessons": [

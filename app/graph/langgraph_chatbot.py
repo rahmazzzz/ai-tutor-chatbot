@@ -1,6 +1,6 @@
 # app/graphs/chatbot_graph.py
 from langgraph.graph import StateGraph, START, END
-from app.services.chatbot_service import ChatbotService
+from app.agents.chatbot_agent import ChatbotService
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from langchain_cohere import ChatCohere
