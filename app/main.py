@@ -1,28 +1,26 @@
 # app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.models.base import Base
-from app.routers import auth_routes, tutor_routes
+from app.routers import auth_routes, tutor_routes, chatbot_routes
 from app.routers.agent_route import router as agent_router
-
+from app.routers.voice_routes import router as voice_router
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.routers import voice_routes
 # --------------------------
-# Database setup (SQLAlchemy)
+# Database setup
 # --------------------------
 DATABASE_URL = f"postgresql://postgres:{settings.SUPABASE_KEY}@{settings.SUPABASE_URL.split('//')[1]}/postgres"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-
 def init_db():
-    """Initialize database tables. Call only when running the server, not during tests."""
     Base.metadata.create_all(bind=engine)
 
-
 # --------------------------
-# FastAPI initialization
+# FastAPI app
 # --------------------------
 app = FastAPI(
     title="AI Tutor with RAG",
@@ -30,30 +28,37 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS (optional)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # adjust in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --------------------------
-# Include routers safely
-# --------------------------
-app.include_router(auth_routes.router, prefix="/auth", tags=["Authentication"])
-app.include_router(tutor_routes.router)  # /tutor prefix already defined in router
-app.include_router(agent_router, prefix="/agent", tags=["Agent"])
-app.include_router(agent_router, prefix="/agent", tags=["Lesson Planner"])
+# Routers
+app.include_router(auth_routes.router)
 app.include_router(tutor_routes.router, prefix="/tutor", tags=["Tutor"])
+app.include_router(chatbot_routes.router)
+app.include_router(agent_router, prefix="/agent", tags=["Agent"])
+
+app.include_router(voice_routes.router)
 # --------------------------
-# Entry point for running with `python -m app.main`
+# Print routes on startup
+# --------------------------
+@app.on_event("startup")
+async def print_routes():
+    print("\n📌 Registered Routes:")
+    for route in app.router.routes:
+        if hasattr(route, "methods"):
+            print(f"  {route.path} → {route.methods}")
+        else:  # WebSockets don't have .methods
+            print(f"  {route.path} → WebSocket")
+
+# --------------------------
+# Entry point
 # --------------------------
 if __name__ == "__main__":
-    # Initialize database tables only when starting the server
     init_db()
-
     import uvicorn
-
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
