@@ -2,23 +2,20 @@
 from langgraph.graph import StateGraph, START, END
 from app.agents.chatbot_agent import ChatbotService
 from sqlalchemy.orm import Session
+from app.clients.mistralai_client import MistralChatClient
+from app.clients.cohere_client import CohereClient
 from app.core.config import settings
-from langchain_cohere import ChatCohere
 
 
 class ChatbotGraph:
     def __init__(self, db: Session):
         self.service = ChatbotService(db)
-        self.llm = ChatCohere(
-            model="command-a-03-2025",
-            cohere_api_key=settings.COHERE_API_KEY,
-            temperature=0.3,
-        )
+        # Primary LLM: Mistral
+        self.mistral_client = MistralChatClient(model_name=settings.MISTRAL_MODEL)
+        # Fallback LLM: Cohere
+        self.cohere_client = CohereClient()
 
-    async def orchestrator_agent(self, state: dict):
-        message = state["message"]
-        user_id = state["user_id"]
-
+    async def _invoke_llm(self, message: str) -> str:
         system_prompt = """
         You are an orchestrator agent. 
         Your job is to decide which specialist agent should handle the user's request.
@@ -32,13 +29,27 @@ class ChatbotGraph:
 
         Respond with ONLY the agent name.
         """
+        # Try Mistral first
+        try:
+            response = await self.mistral_client.chat(
+                user=message,
+                system=system_prompt
+            )
+            return response.answer.strip().lower()
+        except Exception as e:
+            # Fallback to Cohere
+            print(f"[ChatbotGraph] Mistral failed, falling back to Cohere: {e}")
+            response_text = await self.cohere_client.generate(
+                prompt=f"{system_prompt}\nUser message: {message}",
+                max_tokens=50
+            )
+            return response_text.strip().lower()
 
-        llm_response = await self.llm.ainvoke([
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message},
-        ])
+    async def orchestrator_agent(self, state: dict):
+        message = state["message"]
+        user_id = state["user_id"]
 
-        decision = llm_response.content.strip().lower()
+        decision = await self._invoke_llm(message)
         if decision not in ["human_agent", "video_agent", "lesson_agent", "web_agent", "rag_agent"]:
             decision = "rag_agent"
 
