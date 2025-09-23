@@ -8,7 +8,10 @@ class Settings(BaseSettings):
 
     # HuggingFace
     HF_API_TOKEN: str
-
+    ELEVENLABS_API_KEY: str
+    VOICE_NAME: str    # default voice
+    ELEVENLABS_MODEL: str = "eleven_multilingual_v2"  # multilingual model
+    GOOGLE_API_KEY: str
     # JWT
     JWT_SECRET: str
     ALGORITHM: str = "HS256"
@@ -18,6 +21,8 @@ class Settings(BaseSettings):
     MISTRAL_MODEL: str = "magistral-medium-2507"
     MISTRAL_TEMPERATURE: float = 0.7 
     GEMINI_API_KEY: str 
+    COHERE_API_KEY: str
+    TTS_ENGINE: str = "gtts"
     class Config:
         from_attributes = True
         env_file = ".env"

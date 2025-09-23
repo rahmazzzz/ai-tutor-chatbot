@@ -1,49 +1,64 @@
-# app/services/langchain_service.py
-import aiohttp
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema import HumanMessage
-from app.core.config import settings
+import logging
+from typing import List, Optional
 
-class MistralService:
-    """
-    Service to interact with Mistral LLM using async HTTP requests.
-    Uses LangChain's ChatPromptTemplate for structured prompts.
-    """
-    def __init__(self):
-        self.api_url = "https://api.mistral.ai/v1/chat/completions"
-        self.model = settings.MISTRAL_MODEL
-        self.api_key = settings.MISTRAL_API_KEY
-        self.temperature = settings.MISTRAL_TEMPERATURE
+from app.clients.base_client import LLMClient
+from app.clients.mistralai_client import MistralChatClient
+from app.clients.cohere_client import CohereClient
 
-    async def summarize_lessons(self, lessons: list[str]) -> str:
+logger = logging.getLogger(__name__)
+
+
+class LangChainLLMService:
+    """
+    Unified LLM service with dependency-injected primary and fallback clients.
+    Default: Mistral (primary), Cohere (fallback).
+    """
+
+    def __init__(
+        self,
+        primary_client: Optional[LLMClient] = None,
+        fallback_client: Optional[LLMClient] = None,
+    ):
+        # Inject clients or use defaults
+        self.primary_client = primary_client or MistralChatClient()
+        self.fallback_client = fallback_client or CohereClient()
+
+    async def summarize_lessons(self, lessons: List[str]) -> str:
         """
-        Summarize a list of lessons using Mistral LLM.
+        Summarize a list of lessons using the primary client,
+        fallback to secondary on failure (e.g., rate limit).
+        Always returns a string.
         """
-        # Build prompt using LangChain
-        prompt_template = ChatPromptTemplate.from_template(
-            "Summarize the following lessons concisely and clearly:\n{lessons}"
+        if not lessons:
+            return "No lessons provided to summarize."
+
+        summary_prompt = (
+            "Summarize the following lessons concisely and clearly:\n"
+            + "\n".join(lessons)
         )
-        prompt_text = prompt_template.format(lessons="\n".join(lessons))
 
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": "You are a helpful AI assistant that summarizes lessons."},
-                {"role": "user", "content": prompt_text}
-            ],
-            "temperature": self.temperature
-        }
+        # --- Try primary client (Mistral) ---
+        try:
+            logger.info("[LangChainLLMService] Using primary client")
+            response = await self.primary_client.generate(prompt=summary_prompt)
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                self.api_url,
-                json=payload,
-                headers={"Authorization": f"Bearer {self.api_key}"}
-            ) as response:
-                if response.status != 200:
-                    text = await response.text()
-                    raise Exception(f"Mistral API error {response.status}: {text}")
-                data = await response.json()
-        
-        # Extract content from Mistral response
-        return data["choices"][0]["message"]["content"]
+            # Normalize response into string
+            if isinstance(response, str):
+                return response
+            if hasattr(response, "answer"):
+                return str(response.answer)
+            if hasattr(response, "content"):
+                return str(response.content)
+            return str(response)
+
+        except Exception as e:
+            logger.warning(f"[LangChainLLMService] Primary client failed: {e}")
+
+        # --- Fallback to secondary client (Cohere) ---
+        try:
+            logger.info("[LangChainLLMService] Falling back to secondary client")
+            result = await self.fallback_client.generate(prompt=summary_prompt)
+            return str(result)
+        except Exception as e:
+            logger.error(f"[LangChainLLMService] Both clients failed: {e}")
+            raise RuntimeError(f"LLM summarization failed: {e}")

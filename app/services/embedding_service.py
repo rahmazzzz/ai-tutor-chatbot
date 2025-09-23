@@ -1,118 +1,71 @@
 # app/services/embedding_service.py
-import requests
 import logging
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Tuple
 
 from app.models.file import UploadedFile
-from app.models.embedding import Embedding
+from app.repositories.embedding_repository import EmbeddingRepository
 from app.exceptions.base_exceptions import ExternalServiceError, ValidationError
-from app.core.config import settings
+from app.clients.cohere_client import CohereClient
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+EXPECTED_DIM = 1024  # Must match your Postgres VECTOR column
 
 class EmbeddingService:
-    def __init__(self):
-        self.api_key = settings.MISTRAL_API_KEY
-        if not self.api_key:
-            raise ExternalServiceError("MISTRAL_API_KEY not set in settings")
+    def __init__(self, db: Session):
+        self.embedding_repo = EmbeddingRepository(db)
 
-        # Mistral embeddings endpoint
-        self.api_url = "https://api.mistral.ai/v1/embeddings"
-        self.model_name = "mistral-embed"
-        self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        # Use only Cohere
+        try:
+            self.client = CohereClient()
+            logger.info("Using CohereClient for embeddings")
+        except ValueError as e:
+            raise ExternalServiceError(f"Cohere embedding client not available: {e}")
 
-    def _request_embeddings(self, inputs: List[str]) -> List[List[float]]:
-        """Internal helper to call Mistral embeddings API."""
-        if not inputs:
+    async def create_embeddings(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
             return []
 
-        payload = {
-            "model": self.model_name,
-            "input": inputs,   
-        }
-        try:
-            logger.info(f"Requesting embeddings from Mistral for {len(inputs)} inputs")
-            response = requests.post(
-                self.api_url, headers=self.headers, json=payload, timeout=60
-            )
-            response.raise_for_status()
-        except requests.RequestException as e:
-            logger.error(f"Mistral API request failed: {e}")
-            raise ExternalServiceError(f"Mistral embeddings API request failed: {e}")
-
-        try:
-            data = response.json()
-        except ValueError:
-            raise ExternalServiceError("Invalid JSON response from Mistral embeddings API")
-
-        if "data" not in data or not isinstance(data["data"], list):
-            raise ExternalServiceError(
-                f"Unexpected response format from Mistral: {data}"
-            )
-
         embeddings = []
-        for item in data["data"]:
-            emb = item.get("embedding")
-            if not isinstance(emb, list):
-                raise ExternalServiceError("Invalid embedding vector in response")
+        for text in texts:
+            emb = await self.client.embed(text)
+
+            # Dimension check
+            if len(emb) != EXPECTED_DIM:
+                raise ValidationError(
+                    f"Embedding dimension mismatch: got {len(emb)}, expected {EXPECTED_DIM}"
+                )
+
             embeddings.append(emb)
 
-        logger.info(f"Received {len(embeddings)} embeddings from Mistral")
+        logger.info(f"Generated {len(embeddings)} embeddings via CohereClient")
         return embeddings
 
-    def create_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for multiple text chunks using Mistral."""
-        return self._request_embeddings(texts)
-
-    def embed_query(self, query: str) -> List[float]:
-        """Generate embedding for a single query string."""
+    async def embed_query(self, query: str) -> List[float]:
         if not query.strip():
             raise ValidationError("Query text is empty")
 
-        embeddings = self._request_embeddings([query])
-        return embeddings[0] if embeddings else []
+        emb = await self.client.embed(query)
+        if len(emb) != EXPECTED_DIM:
+            raise ValidationError(
+                f"Query embedding dimension mismatch: got {len(emb)}, expected {EXPECTED_DIM}"
+            )
+        return emb
 
-    def create_and_store_embeddings(
+    async def create_and_store_embeddings(
         self,
-        db: Session,
         user_id: str,
         filename: str,
         file_path: str,
         chunks: List[str],
-    ):
-        """Generate embeddings via Mistral, then store file + embeddings in DB."""
-        embeddings = self.create_embeddings(chunks)
-
-        try:
-            file_entry = UploadedFile(
-                user_id=user_id, filename=filename, file_path=file_path
-            )
-            db.add(file_entry)
-            db.commit()
-            db.refresh(file_entry)
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to store uploaded file {filename}: {e}")
-            raise ValidationError(f"Failed to store uploaded file: {e}")
-
-        try:
-            for chunk, vector in zip(chunks, embeddings):
-                emb_obj = Embedding(
-                    file_id=file_entry.id,
-                    content_chunk=chunk,
-                    embedding_vector=vector,
-                )
-                db.add(emb_obj)
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Failed to store embeddings for {filename}: {e}")
-            raise ValidationError(f"Failed to store embeddings: {e}")
-
-        return file_entry, embeddings
+    ) -> Tuple[UploadedFile, List[List[float]]]:
+        embeddings = await self.create_embeddings(chunks)
+        return self.embedding_repo.store_file_and_embeddings(
+            user_id=user_id,
+            filename=filename,
+            file_path=file_path,
+            chunks=chunks,
+            embeddings=embeddings,
+        )

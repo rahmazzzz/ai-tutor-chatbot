@@ -1,8 +1,7 @@
-# app/agents/advanced_lesson_planner_agent.py
 from app.services.user_progress_service import UserProgressService
 from app.utils.web_search import search_web
 from app.utils.youtube_search import YouTubeSearch
-from app.services.langchain_service import MistralService  # Keep your existing service
+from app.services.langchain_service import LangChainLLMService  # Keep your existing service
 
 class AdvancedLessonPlannerAgent:
     """
@@ -10,25 +9,25 @@ class AdvancedLessonPlannerAgent:
     - Fetches user progress
     - Ranks internal lessons
     - Uses web and YouTube searches
-    - Summarizes lessons using MistralService
+    - Summarizes lessons using LangChainLLMService
     - Allows user to set time per task
     """
     def __init__(self, max_results: int = 5):
         self.progress = UserProgressService()
         self.max_results = max_results
         self.youtube_searcher = YouTubeSearch(max_results=max_results)
-        self.llm = MistralService()  # Use your existing langchain_service
+        self.llm = LangChainLLMService()  # Use your existing langchain_service
 
     async def plan_lesson_for_topic(self, user_id: str, topic: str, minutes_per_task: int = 60):
         """
         Plan lessons for a given topic.
         `minutes_per_task` defines the duration for each lesson/task.
         """
-        # 1️⃣ Get user profile and completed lessons
+        # Get user profile and completed lessons
         profile = self.progress.get_user_profile(user_id)
         completed = self.progress.get_completed_lessons(user_id)
 
-        # 2️⃣ Internal lessons (mock example, replace with embeddings search later)
+        # Internal lessons (mock example)
         lessons = [
             {
                 "id": f"{topic}_{i}",
@@ -36,7 +35,7 @@ class AdvancedLessonPlannerAgent:
                 "difficulty": i+1,
                 "content": f"Content for {topic} lesson {i+1}",
                 "type": "pdf",
-                "duration_minutes": minutes_per_task  # <-- user-defined duration
+                "duration_minutes": minutes_per_task
             }
             for i in range(10)
         ]
@@ -46,11 +45,11 @@ class AdvancedLessonPlannerAgent:
             key=lambda x: abs(x['difficulty'] - profile['skill_level'])
         )[:self.max_results]
 
-        # 3️⃣ External searches
+        # External searches
         web_links = await search_web(topic, max_results=self.max_results)
-        youtube_videos = self.youtube_searcher.search(topic)
+        youtube_videos = await self.youtube_searcher.search(topic)
 
-        # 4️⃣ Summarize internal lessons using MistralService
+        # Summarize internal lessons
         lesson_texts = [l["content"] for l in ranked_internal]
         summarized_lessons = await self.llm.summarize_lessons(lesson_texts)
         
@@ -58,13 +57,11 @@ class AdvancedLessonPlannerAgent:
             lesson_summary = await self.llm.summarize_lessons([lesson["content"]])
             lesson["summary"] = [{"type": "text", "text": lesson_summary}]
 
-        # 5️⃣ Compile final lesson plan
-        plan = {
+        # Final lesson plan
+        return {
             "topic": topic,
-            "internal_lessons": [
-                {**lesson, "summary": summarized_lessons} for lesson in ranked_internal
-            ],
+            "internal_lessons": ranked_internal,
+            "overall_summary": summarized_lessons,
             "web_links": web_links,
             "youtube_videos": youtube_videos
         }
-        return plan

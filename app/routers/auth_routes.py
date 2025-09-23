@@ -1,26 +1,27 @@
-# app/routes/auth_routes.py
+# app/routers/auth_routes.py
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.schemas.user_schema import UserCreate, UserOut
 from app.schemas.auth import LoginRequest, AuthResponse
 from app.deps import get_current_user
-from app.container.core_container import AuthContainer
+from app.container.core_container import container  # use the global singleton
 
 # Configure logger
 logger = logging.getLogger("auth_routes")
 logger.setLevel(logging.INFO)
-
-# Optional: add console handler if not configured globally
 if not logger.handlers:
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     ch.setFormatter(formatter)
     logger.addHandler(ch)
 
-# Set the prefix here to avoid double "/auth" when including in main.py
-router = APIRouter(prefix="/auth", tags=["Authentication"])
-auth_container = AuthContainer()
+# NOTE: no duplicate "auth" here — main.py already includes the router directly
+router = APIRouter(prefix="/auth", tags=["Auth"])
+
+auth_service = container.auth_service  # directly use service from container
 
 
 @router.post("/register", response_model=UserOut)
@@ -30,10 +31,10 @@ async def register(user: UserCreate):
     """
     logger.info(f"Attempting to register user: {user.email}")
     try:
-        result = await auth_container.service.register(
+        result = await auth_service.register(
             email=user.email,
             password=user.password,
-            username=user.username
+            username=user.username,
         )
         logger.info(f"User registered successfully: {user.email}")
         return result
@@ -49,9 +50,9 @@ async def login(request: LoginRequest):
     """
     logger.info(f"Login attempt for user: {request.email}")
     try:
-        result = await auth_container.service.login(
+        result = await auth_service.login(
             email=request.email,
-            password=request.password
+            password=request.password,
         )
         logger.info(f"User logged in successfully: {request.email}")
         return result
