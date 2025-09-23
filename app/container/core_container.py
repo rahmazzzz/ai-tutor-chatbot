@@ -39,13 +39,7 @@ auth_service = AuthService()
 embedding_service = EmbeddingService(db_session)
 file_processing_service = FileProcessingService()
 mistral_service = LangChainLLMService()
-rag_service = RAGService(
-    db=db_session,
-    embedding_service=embedding_service,
-    embedding_repo=embedding_repo,
-    file_repo=file_repo,
-    chat_repo=chat_history_repo
-)
+rag_service = RAGService(db=db_session , top_k=5, memory_size=7)
 sql_rag_service = SQLRAGService(
     embedding_repo=embedding_repo,
     file_repo=file_repo

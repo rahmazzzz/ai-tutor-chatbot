@@ -33,17 +33,17 @@ class VideoLink(BaseModel):
 
 
 @router.post("/upload")
-def upload_and_embed(
+async def upload_and_embed(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     logger.info(f"Uploading file '{file.filename}' for user {current_user['sub']}")
-    file_bytes = file.file.read()
+    file_bytes = await file.read()  # async read
     file_path = f"{current_user['sub']}/{file.filename}"
 
     # Upload file to storage
-    storage_service.upload_file(
+    await storage_service.upload_file(
         bucket="user-files",
         file_path=file_path,
         file_content=file_bytes,
@@ -56,8 +56,8 @@ def upload_and_embed(
     chunks = file_processing_service.chunk_text(text)
     logger.info(f"Extracted and chunked text into {len(chunks)} chunks")
 
-    # Create embeddings
-    embedding_service.create_and_store_embeddings(
+    # Create embeddings (async)
+    await embedding_service.create_and_store_embeddings(
         user_id=current_user["sub"],
         filename=file.filename,
         file_path=file_path,
@@ -67,25 +67,24 @@ def upload_and_embed(
 
     return {"message": "File uploaded and embeddings stored", "num_chunks": len(chunks)}
 
-
 @router.post("/ask")
-def ask_question(
+async def ask_question(
     question: str,
     current_user=Depends(get_current_user),
 ):
     logger.info(f"User {current_user['sub']} asking question: {question}")
 
     # Use RAG service from container
-    answer = rag_service.chat(user_input=question, user_id=current_user['sub'])
+    answer =await rag_service.chat(user_input=question, user_id=current_user['sub'])
 
     logger.info(f"Answer generated: {answer}")
     return {"answer": answer}
 
 
 @router.post("/summarize_video")
-def summarize_video(data: VideoLink, user=Depends(get_current_user)):
-    summary = summarize_video_service(data.url)
-    return {
+async def summarize_video(data: VideoLink, user=Depends(get_current_user)):
+    summary =await  summarize_video_service(data.url)
+    return  {
         "url": data.url,
         "summary": summary
     }
