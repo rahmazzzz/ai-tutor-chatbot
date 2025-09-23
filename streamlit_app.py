@@ -4,7 +4,7 @@ import base64
 
 API_URL = "http://127.0.0.1:8000"  # FastAPI backend
 
-st.set_page_config(page_title="AI Chatbot + Voice", layout="wide")
+st.set_page_config(page_title="AI Chatbot + Voice + Upload", layout="wide")
 
 # --- Store token in session ---
 if "token" not in st.session_state:
@@ -59,22 +59,20 @@ with tab2:
         except Exception as e:
             st.error(f"Error: {e}")
 
-# ---------------- CHAT + VOICE ----------------
+# ---------------- LOGGED IN TABS ----------------
 if st.session_state.token:
     st.success("You are logged in ✅")
 
-    chat_tab, voice_tab = st.tabs(["💬 Chatbot", "🎙️ Voice Agent"])
+    chat_tab, voice_tab, upload_tab = st.tabs(["💬 Chatbot", "🎙️ Voice Agent", "📄 Upload File"])
 
     # ---------------- CHAT TAB ----------------
     with chat_tab:
         st.subheader("💬 Chat with AI Tutor")
 
-        # Display chat history
         for role, msg in st.session_state.messages:
             st.chat_message(role).markdown(msg)
 
         if prompt := st.chat_input("Type your message..."):
-            # Save user message
             st.session_state.messages.append(("user", prompt))
             st.chat_message("user").markdown(prompt)
 
@@ -92,7 +90,6 @@ if st.session_state.token:
             except Exception as e:
                 reply = f"⚠️ Backend error: {e}"
 
-            # Save + display reply
             st.session_state.messages.append(("assistant", reply))
             st.chat_message("assistant").markdown(reply)
 
@@ -100,7 +97,6 @@ if st.session_state.token:
     with voice_tab:
         st.subheader("🎙️ Voice Interaction")
 
-        # Record or upload audio
         audio_upload = st.audio_input("🎤 Record your voice")
         uploaded_file = st.file_uploader("Or upload a voice file", type=["wav", "mp3"])
 
@@ -124,7 +120,6 @@ if st.session_state.token:
                         st.subheader("📝 AI Response")
                         st.write(result["text"])
 
-                        # Decode & play TTS audio
                         audio_out = base64.b64decode(result["audio"])
                         st.subheader("🔊 AI Voice Reply")
                         st.audio(audio_out, format="audio/wav")
@@ -132,3 +127,29 @@ if st.session_state.token:
                         st.error(f"Voice request failed: {res.text}")
                 except Exception as e:
                     st.error(f"Error: {e}")
+
+    # ---------------- UPLOAD TAB ----------------
+with upload_tab:
+    st.subheader("📄 Upload File for Embedding")
+    file_to_upload = st.file_uploader("Select a file", type=["pdf", "txt", "docx"])
+
+    if file_to_upload and st.button("Upload File"):
+        with st.spinner("Uploading and processing file..."):
+            try:
+                headers = {"Authorization": f"Bearer {st.session_state.token}"}
+                files = {"file": (file_to_upload.name, file_to_upload, file_to_upload.type)}
+                
+                # ✅ Corrected URL with double /tutor prefix
+                res = requests.post(
+                    f"{API_URL}/tutor/tutor/upload",
+                    files=files,
+                    headers=headers
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    st.success(f"✅ {data['message']}")
+                    st.info(f"Chunks created: {data['num_chunks']}")
+                else:
+                    st.error(f"❌ Upload failed: {res.text}")
+            except Exception as e:
+                st.error(f"Error: {e}")
