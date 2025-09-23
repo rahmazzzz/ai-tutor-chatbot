@@ -21,7 +21,7 @@ class ChatbotGraph:
         Your job is to decide which specialist agent should handle the user's request.
 
         Agents:
-        - human_agent
+        
         - video_agent
         - lesson_agent
         - web_agent
@@ -50,13 +50,12 @@ class ChatbotGraph:
         user_id = state["user_id"]
 
         decision = await self._invoke_llm(message)
-        if decision not in ["human_agent", "video_agent", "lesson_agent", "web_agent", "rag_agent"]:
+        if decision not in [ "video_agent", "lesson_agent", "web_agent", "rag_agent"]:
             decision = "rag_agent"
 
         return {"next": decision, "message": message, "user_id": user_id}
 
-    async def human_agent(self, state: dict):
-        return {"response": await self.service.human_response(state["user_id"], state["message"])}
+
 
     async def video_agent(self, state: dict):
         return {"response": await self.service.summarize_video(state["user_id"], state["message"])}
@@ -74,7 +73,6 @@ class ChatbotGraph:
         workflow = StateGraph(dict)
 
         workflow.add_node("orchestrator", self.orchestrator_agent)
-        workflow.add_node("human_agent", self.human_agent)
         workflow.add_node("video_agent", self.video_agent)
         workflow.add_node("lesson_agent", self.lesson_agent)
         workflow.add_node("web_agent", self.web_agent)
@@ -85,14 +83,14 @@ class ChatbotGraph:
             "orchestrator",
             lambda state: state["next"],
             {
-                "human_agent": "human_agent",
+                
                 "video_agent": "video_agent",
                 "lesson_agent": "lesson_agent",
                 "web_agent": "web_agent",
                 "rag_agent": "rag_agent",
             },
         )
-        workflow.add_edge("human_agent", END)
+        
         workflow.add_edge("video_agent", END)
         workflow.add_edge("lesson_agent", END)
         workflow.add_edge("web_agent", END)

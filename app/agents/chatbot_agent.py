@@ -43,11 +43,7 @@ class ChatbotService:
 
     # --- Specialist Tools ---
 
-    async def human_response(self, user_id: str, message: str) -> str:
-        self.chat_repo.save_message(user_id, "user", message)
-        response = "[HUMAN OVERRIDE] A human will respond shortly."
-        self.chat_repo.save_message(user_id, "assistant", response)
-        return response
+    
 
     async def summarize_video(self, user_id: str, url: str) -> str:
         self.chat_repo.save_message(user_id, "user", url)
