@@ -10,43 +10,64 @@ st.set_page_config(page_title="AI Chatbot + Voice", layout="wide")
 if "token" not in st.session_state:
     st.session_state.token = None
 
-st.title("🔐 Login")
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# --- Login Form ---
-if st.session_state.token is None:
-    with st.form("login_form"):
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Login")
+st.title("🔐 AI Tutor Auth & Chat")
 
-        if submit:
-            try:
-                res = requests.post(
-                    f"{API_URL}/auth/login",
-                    json={"email": email, "password": password}
-                )
-                if res.status_code == 200:
-                    data = res.json()
-                    st.session_state.token = data.get("access_token")
-                    st.success("✅ Logged in successfully!")
-                else:
-                    st.error(f"❌ Login failed: {res.json().get('detail')}")
-            except Exception as e:
-                st.error(f"Error: {e}")
+# --- Tabs for Register/Login ---
+tab1, tab2 = st.tabs(["Login", "Register"])
 
-# --- Chat + Voice UI (only visible when logged in) ---
+# ---------------- LOGIN ----------------
+with tab1:
+    st.subheader("Login")
+    login_email = st.text_input("Email", key="login_email")
+    login_password = st.text_input("Password", type="password", key="login_password")
+    
+    if st.button("Login"):
+        try:
+            res = requests.post(
+                f"{API_URL}/auth/login",
+                json={"email": login_email, "password": login_password}
+            )
+            if res.status_code == 200:
+                data = res.json()
+                st.session_state.token = data.get("access_token")
+                st.success("✅ Logged in successfully!")
+            else:
+                st.error(f"❌ Login failed: {res.json().get('detail')}")
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# ---------------- REGISTER ----------------
+with tab2:
+    st.subheader("Register")
+    reg_email = st.text_input("Email", key="reg_email")
+    reg_username = st.text_input("Username", key="reg_username")
+    reg_password = st.text_input("Password", type="password", key="reg_password")
+    
+    if st.button("Register"):
+        try:
+            res = requests.post(
+                f"{API_URL}/auth/register",
+                json={"email": reg_email, "username": reg_username, "password": reg_password}
+            )
+            if res.status_code == 200:
+                st.success("✅ Registration successful! You can now log in.")
+            else:
+                st.error(f"❌ Registration failed: {res.json().get('detail')}")
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+# ---------------- CHAT + VOICE ----------------
 if st.session_state.token:
     st.success("You are logged in ✅")
 
-    # Tabs
-    tab1, tab2 = st.tabs(["💬 Chatbot", "🎙️ Voice Agent"])
+    chat_tab, voice_tab = st.tabs(["💬 Chatbot", "🎙️ Voice Agent"])
 
     # ---------------- CHAT TAB ----------------
-    with tab1:
+    with chat_tab:
         st.subheader("💬 Chat with AI Tutor")
-
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
 
         # Display chat history
         for role, msg in st.session_state.messages:
@@ -76,7 +97,7 @@ if st.session_state.token:
             st.chat_message("assistant").markdown(reply)
 
     # ---------------- VOICE TAB ----------------
-    with tab2:
+    with voice_tab:
         st.subheader("🎙️ Voice Interaction")
 
         # Record or upload audio

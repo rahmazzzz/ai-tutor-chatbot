@@ -1,63 +1,133 @@
-# 📚 AI Tutor with Voice & Memory  
+# Chat Tutor – AI Voice & Chat Assistant
 
-An **AI-powered tutor platform** that combines **Supabase, LangChain, and LangGraph** to deliver personalized, multilingual, voice-enabled tutoring.  
-
-## 🚀 Features  
-
-- 🔐 **Multi-user authentication** via Supabase Auth  
-- 📂 **File uploads** (PDFs, notes, audio) stored in Supabase Storage  
-- 🧠 **Semantic search** using pgvector embeddings in Postgres  
-- 🗣️ **Voice support** with Speech-to-Text (STT) & Text-to-Speech (TTS)  
-- 🤖 **AI tutoring** powered by LangChain (explanations, quizzes, feedback)  
-- 🔄 **Adaptive learning pipeline** orchestrated with LangGraph  
-- 📊 **Realtime progress tracking** & analytics dashboards via Supabase subscriptions  
-- 🌍 **Multilingual support** (English + Arabic, extendable)  
-- 🎮 *Optional:* Gamification (badges, leaderboards), study groups, multi-agent tutor  
+**Chat Tutor** is an AI-powered chatbot and voice assistant designed to enhance your learning experience. It uses a multi-agent orchestration system to intelligently decide how to help you based on your input. Whether you need web research, YouTube summaries, structured study plans, or semantic search within your documents, Chat Tutor has you covered.
 
 ---
 
-## 🛠 Tech Stack  
+## Features
 
-- **Backend:** FastAPI + LangChain + LangGraph  
-- **Database:** Supabase Postgres + pgvector  
-- **Auth & Storage:** Supabase (users, sessions, file uploads)  
-- **LLMs:** OpenAI / HuggingFace / Cohere (configurable)  
-- **Embeddings:** Sentence Transformers (HuggingFace)  
-- **Voice:** OpenAI Whisper (STT) + ElevenLabs / gTTS (TTS)  
-- **Deployment:** Docker + (Render / Fly.io / Vercel API / Supabase edge functions)  
+### 1. Multi-Modal Interaction
+- **Text Chat:** Ask questions or request learning resources directly via chat.
+- **Voice Input/Output:** Speak with Chat Tutor and receive audio responses using STT/TTS integration.
 
----
+### 2. Orchestrated LLM Intelligence
+- A central LLM orchestrator decides which agent to trigger based on user input:
+  - **Web Search Agent** – Search the web and provide curated results.
+  - **YouTube Summarizer** – Summarize YouTube videos into concise notes.
+  - **Study Planner Agent** – Generate a personalized study plan with:
+    - Tasks divided by topics
+    - Estimated time per task
+    - Recommended sources and references
+  - **Document Search & Summarization** – Upload PDFs, articles, or notes and query them semantically.
 
-## 🏗 Architecture  
+### 3. Content Summarization
+- Summarizes videos, articles, and uploaded documents.
+- Supports multi-step reasoning and provides concise explanations.
 
-```mermaid
-flowchart TD
-    subgraph User
-        U1[Student] -->|Voice/Text| API
-        U2[Teacher] -->|Analytics| API
-    end
+### 4. File Upload & Query
+- Upload documents (PDF, TXT, DOCX) and ask questions directly from the content.
+- Semantic search powered by embeddings and vector stores (e.g., Qdrant, pgVector).
 
-    subgraph Backend[FastAPI Backend]
-        A1[Auth Routes] --> Supabase
-        A2[Upload & Search Routes] --> Storage
-        A3[Tutor Routes] --> LangGraph
-    end
+### 5. Adaptive Learning & Study Management
+- Generates personalized study plans.
+- Breaks topics into tasks with time estimates.
+- Suggests sources, videos, and articles for each task.
 
-    subgraph Supabase
-        DB[(Postgres + pgvector)]
-        Storage[(Storage)]
-        Auth[(Auth)]
-        Realtime[(Subscriptions)]
-    end
+### 6. Multi-Agent Architecture
+- Agents are modular and follow a best-practice, clean architecture design.
+- Orchestrator manages communication between agents.
+- Each agent handles a specific domain: web, YouTube, document, or study planning.
+ 
+## Installation
 
-    subgraph AI
-        LLM[LangChain + OpenAI/HF]
-        Voice[STT + TTS]
-    end
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/chat_tutor.git
+cd chat_tutor
+Create and activate a virtual environment:
 
-    API --> A1 & A2 & A3
-    A2 --> Storage
-    A3 --> DB
-    A3 --> LLM
-    A3 --> Voice
-    Supabase --> Analytics
+bash
+Copy code
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+venv\Scripts\activate     # Windows
+Install dependencies:
+
+bash
+Copy code
+pip install -r requirements.txt
+Configure environment variables in .env:
+
+ini
+Copy code
+MONGO_URI=<your_mongo_connection_string>
+JWT_SECRET=<your_secret_key>
+OPENAI_API_KEY=<your_openai_api_key>
+COHERE_API_KEY=<your_cohere_api_key>
+Usage
+Run the FastAPI server:
+
+bash
+Copy code
+uvicorn app.main:app --reload
+Access the interactive API docs:
+
+arduino
+Copy code
+http://127.0.0.1:8000/docs
+Use the Streamlit or web frontend to interact with:
+
+Chat interface
+
+Voice input/output
+
+Document uploads
+
+Study plan generation
+
+Example Scenarios
+Ask Chat Tutor:
+"I want to learn Python for data analysis in 7 days."
+→ Generates a task-by-task study plan with resources and estimated times.
+
+Web Search:
+"Find recent articles on GPT-5 applications"
+→ Provides curated search results.
+
+YouTube Summarization:
+"Summarize the video: <YouTube link>"
+→ Returns key points and a summary.
+
+Document Query:
+Upload ML_notes.pdf and ask: "Explain gradient descent"
+→ Retrieves relevant sections and explains.
+
+Technology Stack
+Backend: FastAPI, Python
+
+Database: MongoDB (user & session management)
+
+Vector Search: Qdrant / pgVector
+
+LLM: OpenAI GPT, Cohere
+
+Voice: STT/TTS (optional: ElevenLabs)
+
+Orchestration: Multi-agent LLM orchestrator for intelligent task delegation
+
+Frontend: Streamlit / Custom web interface
+
+Contributing
+Contributions are welcome! Please follow best practices:
+
+Use feature branches
+
+Write clear commit messages
+
+Follow the modular architecture
+
+Ensure proper testing for new services or agents
+
+License
+MIT License © 2025 Rahma Hassan
+
