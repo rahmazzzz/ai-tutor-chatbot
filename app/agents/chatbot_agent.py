@@ -8,6 +8,8 @@ from app.agents.advanced_lesson_planner_agent import AdvancedLessonPlannerAgent
 from app.utils.web_search import search_web
 from app.utils.youtube_search import YouTubeSearch
 from app.repositories.chat_history_repository import ChatHistoryRepository
+from app.repositories.embedding_repository import EmbeddingRepository
+from app.repositories.file_repository import FileRepository
 from sqlalchemy.orm import Session
 import asyncio
 import logging
@@ -21,7 +23,6 @@ VIDEO_URL_PATTERN = r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+"
 class ChatbotService:
     """
     A toolbox of specialist skills that the orchestrator agent (Gemini) can call.
-    This class no longer does keyword-based routing.
     """
 
     def __init__(self, db: Session):
@@ -30,36 +31,31 @@ class ChatbotService:
         self.youtube_searcher = YouTubeSearch()
         self.lesson_planner = LessonPlannerAgent()
         self.advanced_planner = AdvancedLessonPlannerAgent()
-        self.rag_service = RAGService(
-            db,
-            embedding_service=None,
-            embedding_repo=None,
-            file_repo=None,
-            chat_repo=self.chat_repo,
-        )
+
+        self.rag_service = RAGService(db=db)
+
+        embedding_repo = EmbeddingRepository(db)
+        file_repo = FileRepository(db)
         self.sql_rag_service = SQLRAGService(
-            embedding_repo=None,
-            file_repo=None,
+            embedding_repo=embedding_repo,
+            file_repo=file_repo
         )
 
     # --- Specialist Tools ---
 
     async def human_response(self, user_id: str, message: str) -> str:
-        """Escalate to human support."""
         self.chat_repo.save_message(user_id, "user", message)
         response = "[HUMAN OVERRIDE] A human will respond shortly."
         self.chat_repo.save_message(user_id, "assistant", response)
         return response
 
     async def summarize_video(self, user_id: str, url: str) -> str:
-        """Summarize YouTube video."""
         self.chat_repo.save_message(user_id, "user", url)
         summary = await asyncio.to_thread(summarize_video_service, url)
         self.chat_repo.save_message(user_id, "assistant", summary)
         return summary
 
     async def plan_lesson(self, user_id: str, message: str) -> Dict[str, Any]:
-        """Generate lesson plan for a topic."""
         topic = message.replace("plan lesson", "").replace("lesson plan", "").strip() or "general"
         self.chat_repo.save_message(user_id, "user", message)
         plan = await self.advanced_planner.plan_lesson_for_topic(user_id, topic)
@@ -67,17 +63,59 @@ class ChatbotService:
         return plan
 
     async def web_search(self, user_id: str, message: str) -> Dict[str, Any]:
-        """Perform web search."""
         query = message.replace("search web", "").strip()
         self.chat_repo.save_message(user_id, "user", message)
         results = await search_web(query)
         self.chat_repo.save_message(user_id, "assistant", str(results))
         return results
 
-    def rag_response(self, user_id: str, message: str) -> str:
-        """Answer using RAG (documents + LLM)."""
+    async def rag_response(self, user_id: str, message: str) -> str:
+        """Answer using RAG (documents + LLM), safely handling coroutines and list responses."""
         self.chat_repo.save_message(user_id, "user", message)
-        response = self.rag_service.chat(message, user_id)
+
+        try:
+            response = await self.rag_service.chat(user_input=message, user_id=user_id)
+
+            # If a coroutine is returned unexpectedly, await it
+            if asyncio.iscoroutine(response):
+                response = await response
+
+            # If it's a list of objects, try to extract text
+            if isinstance(response, list):
+                def extract_text(r):
+                    if hasattr(r, "text"):
+                        return str(r.text)
+                    elif hasattr(r, "thinking"):
+                        return " ".join(str(t) for t in r.thinking)
+                    return str(r)
+                response = " ".join(extract_text(r) for r in response)
+
+            # Ensure final response is a string
+            response = str(response)
+
+        except Exception as e:
+            logger.error(f"[ChatbotService] RAG failed: {e}")
+            response = "[RAG ERROR] Unable to fetch response."
+
+        self.chat_repo.save_message(user_id, "assistant", response)
+        return response
+
+    async def sql_rag_response(self, user_id: str, query_embedding: list[float], k: int = 5) -> str:
+        """Retrieve documents from SQLRAGService and return combined text."""
+        self.chat_repo.save_message(user_id, "user", f"[SQL RAG QUERY] {query_embedding}")
+
+        try:
+            docs = self.sql_rag_service.get_similar_documents(query_embedding=query_embedding, k=k)
+            if asyncio.iscoroutine(docs):
+                docs = await docs
+            if isinstance(docs, list):
+                response = " ".join(str(d) for d in docs)
+            else:
+                response = str(docs)
+        except Exception as e:
+            logger.error(f"[ChatbotService] SQL RAG failed: {e}")
+            response = "[SQL RAG ERROR] Unable to fetch documents."
+
         self.chat_repo.save_message(user_id, "assistant", response)
         return response
 

@@ -6,7 +6,7 @@ from app.exceptions.base_exceptions import ExternalServiceError
 class StorageService:
 
     @handle_exceptions
-    def upload_file(self, bucket: str, file_path: str, file_content: bytes, token: str):
+    async def upload_file(self, bucket: str, file_path: str, file_content: bytes, token: str):
         """
         Uploads a file to a Supabase storage bucket using the user's JWT for authorization.
         Raises ExternalServiceError on failure.
@@ -21,7 +21,7 @@ class StorageService:
             raise ExternalServiceError(f"Supabase upload failed: {str(e)}")
 
     @handle_exceptions
-    def download_file(self, bucket: str, file_path: str, token: str) -> bytes:
+    async def download_file(self, bucket: str, file_path: str, token: str) -> bytes:
         """
         Downloads a file from a Supabase storage bucket using the user's JWT for authorization.
         Raises ExternalServiceError if the file is not found or any other error occurs.

@@ -5,6 +5,7 @@ from app.deps import get_current_user
 from app.clients.supabase_client import get_db
 from app.graph.langgraph_chatbot import ChatbotGraph
 from app.agents.chatbot_agent import ChatbotService
+import asyncio
 
 router = APIRouter(prefix="/chatbot", tags=["Chatbot"])
 
@@ -23,7 +24,7 @@ async def chat_endpoint(
     Main chatbot endpoint.
     Sends the user message into the LangGraph workflow (Cohere orchestrator).
     """
-    graph = ChatbotGraph(db).build()   # ✅ build the workflow
+    graph = ChatbotGraph(db).build()  # build the workflow
 
     result = await graph.ainvoke(
         {
@@ -31,7 +32,14 @@ async def chat_endpoint(
             "user_id": user["sub"],
         }
     )
+
     response = result.get("response", "")
+
+    # Ensure response is a string
+    if asyncio.iscoroutine(response):
+        response = await response
+    if isinstance(response, list):
+        response = " ".join(str(r) for r in response)
 
     return {"response": response}
 
@@ -46,4 +54,9 @@ async def chat_history(
     """
     service = ChatbotService(db)
     history = await service.get_history(user_id=user["sub"])
+
+    # Ensure history is JSON-serializable (list of dicts)
+    if history is None:
+        history = []
+
     return {"history": history}
