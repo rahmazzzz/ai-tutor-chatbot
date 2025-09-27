@@ -6,3 +6,5 @@ libsrtp2-dev
 libsm6
 libxext6
 libmagic-dev
+libssl-dev
+portaudio19-dev
