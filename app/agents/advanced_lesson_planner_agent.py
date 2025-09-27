@@ -2,6 +2,11 @@ from app.services.user_progress_service import UserProgressService
 from app.utils.web_search import search_web
 from app.utils.youtube_search import YouTubeSearch
 from app.services.langchain_service import LangChainLLMService  # Keep your existing service
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 class AdvancedLessonPlannerAgent:
     """
@@ -45,17 +50,34 @@ class AdvancedLessonPlannerAgent:
             key=lambda x: abs(x['difficulty'] - profile['skill_level'])
         )[:self.max_results]
 
-        # External searches
-        web_links = await search_web(topic, max_results=self.max_results)
-        youtube_videos = await self.youtube_searcher.search(topic)
+        # --- External searches with error handling ---
+        try:
+            web_links = await search_web(topic, max_results=self.max_results)
+        except Exception as e:
+            logger.error(f"[AdvancedLessonPlannerAgent] Web search failed: {e}")
+            web_links = []
+
+        try:
+            youtube_videos = await self.youtube_searcher.search(topic)
+        except Exception as e:
+            logger.error(f"[AdvancedLessonPlannerAgent] YouTube search failed: {e}")
+            youtube_videos = []
 
         # Summarize internal lessons
         lesson_texts = [l["content"] for l in ranked_internal]
-        summarized_lessons = await self.llm.summarize_lessons(lesson_texts)
-        
+        try:
+            summarized_lessons = await self.llm.summarize_lessons(lesson_texts)
+        except Exception as e:
+            logger.error(f"[AdvancedLessonPlannerAgent] LLM summarization failed: {e}")
+            summarized_lessons = "Summary unavailable."
+
         for lesson in ranked_internal:
-            lesson_summary = await self.llm.summarize_lessons([lesson["content"]])
-            lesson["summary"] = [{"type": "text", "text": lesson_summary}]
+            try:
+                lesson_summary = await self.llm.summarize_lessons([lesson["content"]])
+                lesson["summary"] = [{"type": "text", "text": lesson_summary}]
+            except Exception as e:
+                logger.error(f"[AdvancedLessonPlannerAgent] LLM summary failed for lesson {lesson['id']}: {e}")
+                lesson["summary"] = [{"type": "text", "text": "Summary unavailable."}]
 
         # Final lesson plan
         return {

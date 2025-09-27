@@ -1,18 +1,24 @@
+# app/agents/chatbot_agent.py
 import re
 from typing import Any, Dict
+from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+import asyncio
+import logging
+
+from app.clients.mistralai_client import MistralChatClient
 from app.services.summarize_video import summarize_video_service
 from app.services.rag_service import RAGService
 from app.services.sql_rag_service import SQLRAGService
-from app.agents.lesson_planner import LessonPlannerAgent
+from app.agents.advanced_search_agent import LessonPlannerAgent
 from app.agents.advanced_lesson_planner_agent import AdvancedLessonPlannerAgent
+from app.agents.plan_calender_agent import PlanCalendarAgent
+from app.services.google_calendar_service import GoogleCalendarService
 from app.utils.web_search import search_web
 from app.utils.youtube_search import YouTubeSearch
 from app.repositories.chat_history_repository import ChatHistoryRepository
 from app.repositories.embedding_repository import EmbeddingRepository
 from app.repositories.file_repository import FileRepository
-from sqlalchemy.orm import Session
-import asyncio
-import logging
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -32,18 +38,28 @@ class ChatbotService:
         self.lesson_planner = LessonPlannerAgent()
         self.advanced_planner = AdvancedLessonPlannerAgent()
 
-        self.rag_service = RAGService(db=db)
+        # --- Core dependencies ---
+        llm_client = MistralChatClient()
+        google_calendar = GoogleCalendarService()
 
+        # --- Calendar Agent (fixed initialization) ---
+        self.plan_calendar_agent = PlanCalendarAgent(
+            llm=llm_client,
+            chat_repo=self.chat_repo,  # pass ChatHistoryRepository instance
+            google_calendar=google_calendar,
+        )
+        self.calendar_service = google_calendar
+
+        # --- RAG services ---
+        self.rag_service = RAGService(db=db)
         embedding_repo = EmbeddingRepository(db)
         file_repo = FileRepository(db)
         self.sql_rag_service = SQLRAGService(
             embedding_repo=embedding_repo,
-            file_repo=file_repo
+            file_repo=file_repo,
         )
 
     # --- Specialist Tools ---
-
-    
 
     async def summarize_video(self, user_id: str, url: str) -> str:
         self.chat_repo.save_message(user_id, "user", url)
@@ -52,43 +68,83 @@ class ChatbotService:
         return summary
 
     async def plan_lesson(self, user_id: str, message: str) -> Dict[str, Any]:
-        topic = message.replace("plan lesson", "").replace("lesson plan", "").strip() or "general"
+        topic = (
+            message.replace("plan lesson", "")
+            .replace("lesson plan", "")
+            .strip()
+            or "general"
+        )
         self.chat_repo.save_message(user_id, "user", message)
-        plan = await self.advanced_planner.plan_lesson_for_topic(user_id, topic)
-        self.chat_repo.save_message(user_id, "assistant", str(plan))
-        return plan
+
+        try:
+            plan = await self.advanced_planner.plan_lesson_for_topic(user_id, topic)
+            self.chat_repo.save_message(user_id, "assistant", str(plan))
+            self.chat_repo.save_last_plan(user_id, plan)
+            return {"plan_text": str(plan)}
+        except Exception as e:
+            logger.error(f"[ChatbotService] plan_lesson failed: {e}")
+            return {"error": str(e)}
+
+    async def add_plan_to_calendar(self, user_id: str) -> Dict[str, Any]:
+        self.chat_repo.save_message(user_id, "user", "Add plan to Google Calendar")
+
+        try:
+            last_plan = self.chat_repo.get_last_plan(user_id)
+            if not last_plan:
+                return {"success": False, "error": "No existing plan found to add to calendar."}
+
+            # Default times if none specified
+            start_time = datetime.utcnow() + timedelta(minutes=5)
+            end_time = start_time + timedelta(hours=1)
+
+            event_data = {
+                "title": "Lesson Plan",
+                "description": str(last_plan),
+                "start_time": start_time,
+                "end_time": end_time,
+            }
+
+            google_event_id = self.calendar_service.create_event(event_data)
+            self.chat_repo.save_message(user_id, "assistant", "Plan added to Google Calendar ✅")
+
+            return {"success": True, "google_event_id": google_event_id, "plan_text": str(last_plan)}
+        except Exception as e:
+            logger.error(f"[ChatbotService] add_plan_to_calendar failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def mark_task_done(self, user_id: str, event_id: str) -> Dict[str, Any]:
+        try:
+            result = await self.plan_calendar_agent.mark_task_done(user_id, event_id)
+            if isinstance(result, dict) and result.get("success"):
+                return result
+            logger.error(f"[calendar_agent] Unexpected result format: {result}")
+            return {"success": False, "error": "Unexpected result format"}
+        except Exception as e:
+            logger.error(f"[ChatbotService] mark_task_done failed: {e}")
+            return {"success": False, "error": str(e)}
 
     async def web_search(self, user_id: str, message: str) -> Dict[str, Any]:
         query = message.replace("search web", "").strip()
         self.chat_repo.save_message(user_id, "user", message)
-        results = await search_web(query)
-        self.chat_repo.save_message(user_id, "assistant", str(results))
-        return results
+
+        try:
+            results = await search_web(query)
+            self.chat_repo.save_message(user_id, "assistant", str(results))
+            return results
+        except Exception as e:
+            logger.error(f"[ChatbotService] web_search failed: {e}")
+            return {"success": False, "error": str(e)}
 
     async def rag_response(self, user_id: str, message: str) -> str:
-        """Answer using RAG (documents + LLM), safely handling coroutines and list responses."""
         self.chat_repo.save_message(user_id, "user", message)
 
         try:
             response = await self.rag_service.chat(user_input=message, user_id=user_id)
-
-            # If a coroutine is returned unexpectedly, await it
             if asyncio.iscoroutine(response):
                 response = await response
-
-            # If it's a list of objects, try to extract text
             if isinstance(response, list):
-                def extract_text(r):
-                    if hasattr(r, "text"):
-                        return str(r.text)
-                    elif hasattr(r, "thinking"):
-                        return " ".join(str(t) for t in r.thinking)
-                    return str(r)
-                response = " ".join(extract_text(r) for r in response)
-
-            # Ensure final response is a string
+                response = " ".join(str(r) for r in response)
             response = str(response)
-
         except Exception as e:
             logger.error(f"[ChatbotService] RAG failed: {e}")
             response = "[RAG ERROR] Unable to fetch response."
@@ -97,17 +153,13 @@ class ChatbotService:
         return response
 
     async def sql_rag_response(self, user_id: str, query_embedding: list[float], k: int = 5) -> str:
-        """Retrieve documents from SQLRAGService and return combined text."""
         self.chat_repo.save_message(user_id, "user", f"[SQL RAG QUERY] {query_embedding}")
 
         try:
             docs = self.sql_rag_service.get_similar_documents(query_embedding=query_embedding, k=k)
             if asyncio.iscoroutine(docs):
                 docs = await docs
-            if isinstance(docs, list):
-                response = " ".join(str(d) for d in docs)
-            else:
-                response = str(docs)
+            response = " ".join(str(d) for d in docs) if isinstance(docs, list) else str(docs)
         except Exception as e:
             logger.error(f"[ChatbotService] SQL RAG failed: {e}")
             response = "[SQL RAG ERROR] Unable to fetch documents."
@@ -115,7 +167,18 @@ class ChatbotService:
         self.chat_repo.save_message(user_id, "assistant", response)
         return response
 
-    # --- History ---
-
     async def get_history(self, user_id: str, limit: int = 50):
-        return self.chat_repo.get_by_user(self.db, user_id=user_id, limit=limit)
+        try:
+            return self.chat_repo.get_by_user(self.db, user_id=user_id, limit=limit)
+        except Exception as e:
+            logger.error(f"[ChatbotService] get_history failed: {e}")
+            return []
+
+    async def handle_user_message(self, user_id: str, message: str) -> Dict[str, Any]:
+        if "plan lesson" in message.lower() or "lesson plan" in message.lower():
+            return await self.plan_lesson(user_id, message)
+        elif "add to calendar" in message.lower() or "schedule plan" in message.lower():
+            return await self.add_plan_to_calendar(user_id)
+        else:
+            return {"success": False, "info": "Message received, but no action matched."}
+
