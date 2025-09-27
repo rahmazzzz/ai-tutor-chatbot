@@ -1,5 +1,5 @@
 # app/graph/langgraph_orchestrator.py
-from app.agents.lesson_planner import LessonPlannerAgent
+from app.agents.advanced_search_agent import LessonPlannerAgent
 
 class TutorOrchestrator:
     def __init__(self):

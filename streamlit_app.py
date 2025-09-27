@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as st 
 import requests
 import base64
 
@@ -84,7 +84,18 @@ if st.session_state.token:
                     headers=headers
                 )
                 if res.status_code == 200:
-                    reply = res.json().get("response", "⚠️ No reply")
+                    data = res.json()
+                    reply = data.get("response", "⚠️ No reply")
+
+                    # --- NEW: show orchestrator decision ---
+                    decision = data.get("decision")
+                    if decision:
+                        reply += f"\n\n🤖 *Orchestrator chose*: `{decision}`"
+
+                    # --- Optional: show raw state for debugging ---
+                    if st.checkbox("Show raw state (debug)"):
+                        st.json(data.get("raw_state", {}))
+
                 else:
                     reply = f"Error {res.status_code}: {res.text}"
             except Exception as e:
@@ -129,27 +140,27 @@ if st.session_state.token:
                     st.error(f"Error: {e}")
 
     # ---------------- UPLOAD TAB ----------------
-with upload_tab:
-    st.subheader("📄 Upload File for Embedding")
-    file_to_upload = st.file_uploader("Select a file", type=["pdf", "txt", "docx"])
+    with upload_tab:
+        st.subheader("📄 Upload File for Embedding")
+        file_to_upload = st.file_uploader("Select a file", type=["pdf", "txt", "docx"])
 
-    if file_to_upload and st.button("Upload File"):
-        with st.spinner("Uploading and processing file..."):
-            try:
-                headers = {"Authorization": f"Bearer {st.session_state.token}"}
-                files = {"file": (file_to_upload.name, file_to_upload, file_to_upload.type)}
-                
-                # ✅ Corrected URL with double /tutor prefix
-                res = requests.post(
-                    f"{API_URL}/tutor/tutor/upload",
-                    files=files,
-                    headers=headers
-                )
-                if res.status_code == 200:
-                    data = res.json()
-                    st.success(f"✅ {data['message']}")
-                    st.info(f"Chunks created: {data['num_chunks']}")
-                else:
-                    st.error(f"❌ Upload failed: {res.text}")
-            except Exception as e:
-                st.error(f"Error: {e}")
+        if file_to_upload and st.button("Upload File"):
+            with st.spinner("Uploading and processing file..."):
+                try:
+                    headers = {"Authorization": f"Bearer {st.session_state.token}"}
+                    files = {"file": (file_to_upload.name, file_to_upload, file_to_upload.type)}
+                    
+                    # ✅ Corrected URL with double /tutor prefix
+                    res = requests.post(
+                        f"{API_URL}/tutor/tutor/upload",
+                        files=files,
+                        headers=headers
+                    )
+                    if res.status_code == 200:
+                        data = res.json()
+                        st.success(f"✅ {data['message']}")
+                        st.info(f"Chunks created: {data['num_chunks']}")
+                    else:
+                        st.error(f"❌ Upload failed: {res.text}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
