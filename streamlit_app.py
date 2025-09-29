@@ -1,21 +1,47 @@
-import streamlit as st 
-import requests
+import streamlit as st
 import base64
+import asyncio
+from sqlalchemy.orm import Session
 
-API_URL = "http://127.0.0.1:8000"  # FastAPI backend
+from app.agents.voice_agent import VoiceAgent
+from app.container.core_container import container
+from app.services.notes_service import NotesService
+from app.clients.supabase_client import get_db
+from app.agents.chatbot_agent import ChatbotService
+from app.agents.voice_agent import VoiceAgent
+from app.services.voice_service import VoiceService
+from app.graph.langgraph_chatbot import ChatbotGraph
 
-st.set_page_config(page_title="AI Chatbot + Voice + Upload", layout="wide")
+# Initialize services from container
+auth_service = container.auth_service
+file_processing_service = container.file_processing_service
+embedding_service = container.embedding_service
+storage_service = container.storage_service
+rag_service = container.rag_service
+summarize_video_service = container.summarize_video_service
 
-# --- Store token in session ---
-if "token" not in st.session_state:
-    st.session_state.token = None
+# Initialize additional services
+notes_service = NotesService()
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# ----------------- DB session for services -----------------
+db: Session = next(get_db())
+chat_service = ChatbotService(db=db)
+
+# Initialize voice components
+voice_service = VoiceService()
+chatbot_graph = ChatbotGraph(db)
+voice_agent_instance = VoiceAgent(db)
+
+st.set_page_config(page_title="AI Tutor + Voice + Lecture Notes", layout="wide")
+
+# --- Session state initialization ---
+for key in ["token", "messages", "last_transcript", "last_notes", "current_user"]:
+    if key not in st.session_state:
+        st.session_state[key] = None if key in ["last_transcript", "last_notes", "current_user"] else []
 
 st.title("🔐 AI Tutor Auth & Chat")
 
-# --- Tabs for Register/Login ---
+# --- Tabs for Login/Register ---
 tab1, tab2 = st.tabs(["Login", "Register"])
 
 # ---------------- LOGIN ----------------
@@ -23,21 +49,20 @@ with tab1:
     st.subheader("Login")
     login_email = st.text_input("Email", key="login_email")
     login_password = st.text_input("Password", type="password", key="login_password")
-    
-    if st.button("Login"):
+
+    if st.button("Login", key="login_btn"):
         try:
-            res = requests.post(
-                f"{API_URL}/auth/login",
-                json={"email": login_email, "password": login_password}
-            )
-            if res.status_code == 200:
-                data = res.json()
-                st.session_state.token = data.get("access_token")
-                st.success("✅ Logged in successfully!")
-            else:
-                st.error(f"❌ Login failed: {res.json().get('detail')}")
+            auth_response = asyncio.run(auth_service.login(email=login_email, password=login_password))
+            
+            st.session_state.token = auth_response.access_token
+            st.session_state.current_user = {
+                "email": auth_response.user.email,
+                "sub": auth_response.user.id
+            }
+            
+            st.success(f"✅ Logged in successfully as {st.session_state.current_user['email']}")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"❌ Login failed: {e}")
 
 # ---------------- REGISTER ----------------
 with tab2:
@@ -45,122 +70,227 @@ with tab2:
     reg_email = st.text_input("Email", key="reg_email")
     reg_username = st.text_input("Username", key="reg_username")
     reg_password = st.text_input("Password", type="password", key="reg_password")
-    
-    if st.button("Register"):
+
+    if st.button("Register", key="register_btn"):
         try:
-            res = requests.post(
-                f"{API_URL}/auth/register",
-                json={"email": reg_email, "username": reg_username, "password": reg_password}
-            )
-            if res.status_code == 200:
-                st.success("✅ Registration successful! You can now log in.")
-            else:
-                st.error(f"❌ Registration failed: {res.json().get('detail')}")
+            user_out = asyncio.run(auth_service.register(
+                email=reg_email,
+                username=reg_username,
+                password=reg_password
+            ))
+            
+            st.session_state.current_user = {
+                "email": user_out.email,
+                "sub": user_out.id
+            }
+            st.success("✅ Registration successful! You can now log in.")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"❌ Registration failed: {e}")
 
 # ---------------- LOGGED IN TABS ----------------
-if st.session_state.token:
-    st.success("You are logged in ✅")
+if st.session_state.token and st.session_state.current_user:
+    st.success(f"You are logged in as {st.session_state.current_user['email']} ✅")
 
-    chat_tab, voice_tab, upload_tab = st.tabs(["💬 Chatbot", "🎙️ Voice Agent", "📄 Upload File"])
+    chat_tab, voice_tab, upload_tab, lecture_tab = st.tabs(
+        ["💬 Chatbot", "🎙️ Voice Agent", "📄 Upload File", "📝 Lecture Notes"]
+    )
 
     # ---------------- CHAT TAB ----------------
     with chat_tab:
         st.subheader("💬 Chat with AI Tutor")
+        
+        if "messages" not in st.session_state:
+            st.session_state.messages = []
 
+        # Display previous chat messages
         for role, msg in st.session_state.messages:
             st.chat_message(role).markdown(msg)
 
-        if prompt := st.chat_input("Type your message..."):
+        # Input for new message
+        if prompt := st.chat_input("Type your message...", key="chat_input"):
             st.session_state.messages.append(("user", prompt))
             st.chat_message("user").markdown(prompt)
 
-            try:
-                headers = {"Authorization": f"Bearer {st.session_state.token}"}
-                res = requests.post(
-                    f"{API_URL}/chatbot/",
-                    json={"message": prompt},
-                    headers=headers
-                )
-                if res.status_code == 200:
-                    data = res.json()
-                    reply = data.get("response", "⚠️ No reply")
-
-                    # --- NEW: show orchestrator decision ---
-                    decision = data.get("decision")
-                    if decision:
-                        reply += f"\n\n🤖 *Orchestrator chose*: `{decision}`"
-
-                    # --- Optional: show raw state for debugging ---
-                    if st.checkbox("Show raw state (debug)"):
-                        st.json(data.get("raw_state", {}))
-
-                else:
-                    reply = f"Error {res.status_code}: {res.text}"
-            except Exception as e:
-                reply = f"⚠️ Backend error: {e}"
-
-            st.session_state.messages.append(("assistant", reply))
-            st.chat_message("assistant").markdown(reply)
-
-    # ---------------- VOICE TAB ----------------
-    with voice_tab:
-        st.subheader("🎙️ Voice Interaction")
-
-        audio_upload = st.audio_input("🎤 Record your voice")
-        uploaded_file = st.file_uploader("Or upload a voice file", type=["wav", "mp3"])
-
-        if (audio_upload or uploaded_file) and st.button("Send Voice"):
-            with st.spinner("Processing voice..."):
-                if audio_upload is not None:
-                    files = {"file": ("recorded.wav", audio_upload, "audio/wav")}
-                else:
-                    files = {"file": (uploaded_file.name, uploaded_file, uploaded_file.type)}
-
+            with st.spinner("AI Tutor is typing..."):
                 try:
-                    headers = {"Authorization": f"Bearer {st.session_state.token}"}
-                    res = requests.post(
-                        f"{API_URL}/voice/process",
-                        files=files,
-                        headers=headers
-                    )
+                    user_id = st.session_state.current_user["sub"]
+                    
+                    async def get_chat_response():
+                        # Use the chatbot graph (orchestrator) for general chat
+                        result = await chatbot_graph.ainvoke({"message": prompt, "user_id": user_id})
+                        
+                        # Debug: Print the result to understand what's happening
+                        print(f"Chatbot result: {result}")
+                        
+                        response_text = result.get("response", "Sorry, I couldn't process that.")
+                        
+                        # Handle different response types
+                        if isinstance(response_text, list):
+                            response_text = " ".join(str(r) for r in response_text)
+                        elif isinstance(response_text, dict):
+                            response_text = str(response_text)
+                        
+                        return response_text
+                    
+                    response_text = asyncio.run(get_chat_response())
+                    st.session_state.messages.append(("assistant", response_text))
+                    st.chat_message("assistant").markdown(response_text)
 
-                    if res.status_code == 200:
-                        result = res.json()
-                        st.subheader("📝 AI Response")
-                        st.write(result["text"])
+                except Exception as e:
+                    # Try fallback to simple RAG service
+                    try:
+                        async def fallback_chat():
+                            return await rag_service.chat(prompt, user_id)
+                        
+                        fallback_response = asyncio.run(fallback_chat())
+                        st.session_state.messages.append(("assistant", fallback_response))
+                        st.chat_message("assistant").markdown(fallback_response)
+                    except Exception as fallback_error:
+                        fallback_msg = f"⚠️ I couldn't process that message. Error: {str(e)}"
+                        st.session_state.messages.append(("assistant", fallback_msg))
+                        st.chat_message("assistant").markdown(fallback_msg)
 
-                        audio_out = base64.b64decode(result["audio"])
-                        st.subheader("🔊 AI Voice Reply")
-                        st.audio(audio_out, format="audio/wav")
-                    else:
-                        st.error(f"Voice request failed: {res.text}")
+   # ---------------- VOICE TAB ----------------
+# ---------------- VOICE TAB ----------------
+with voice_tab:
+    st.subheader("🎙️ Voice Interaction")
+    audio_upload = st.audio_input("🎤 Record your voice", key="voice_record")
+    uploaded_file = st.file_uploader("Or upload a voice file", type=["wav", "mp3"], key="voice_file")
+
+    if (audio_upload or uploaded_file) and st.button("Send Voice", key="voice_send"):
+        if not st.session_state.current_user:
+            st.warning("Please log in first!")
+        else:
+            with st.spinner("Processing voice..."):
+                try:
+                    # Handle different audio input types → convert to raw bytes
+                    audio_bytes = None
+                    file_name = None
+
+                    if audio_upload is not None:
+                        # st.audio_input may return bytes-like or UploadedFile
+                        if isinstance(audio_upload, (bytes, bytearray, memoryview)):
+                            audio_bytes = bytes(audio_upload)
+                        elif hasattr(audio_upload, "read"):
+                            audio_bytes = audio_upload.read()
+                        else:
+                            audio_bytes = None
+                        file_name = "recorded_audio.wav"
+                    elif uploaded_file is not None:
+                        # st.file_uploader returns UploadedFile
+                        audio_bytes = uploaded_file.read()
+                        file_name = getattr(uploaded_file, "name", "uploaded_audio")
+
+                    # Ensure we have valid audio bytes
+                    if not isinstance(audio_bytes, (bytes, bytearray, memoryview)) or len(audio_bytes) == 0:
+                        st.error("No valid audio input provided")
+                        st.stop()
+
+                    # Optional info after ensuring bytes
+                    try:
+                        st.info(f"Using audio: {file_name or 'audio'} ({len(audio_bytes)} bytes)")
+                    except Exception:
+                        pass
+
+                    user_id = st.session_state.current_user["sub"]
+
+                    async def process_voice():
+                        return await voice_agent_instance.handle_audio(bytes(audio_bytes), user_id)
+
+                    # Run async agent
+                    result = asyncio.run(process_voice())
+                    transcript = result["text"]
+                    st.session_state.last_transcript = transcript
+
+                    # Show AI text response
+                    st.subheader("📝 AI Response")
+                    st.write(transcript)
+
+                    # Play AI voice reply (already bytes)
+                    st.subheader("🔊 AI Voice Reply")
+                    st.audio(result["audio"], format="audio/wav")
+
                 except Exception as e:
                     st.error(f"Error: {e}")
 
     # ---------------- UPLOAD TAB ----------------
     with upload_tab:
         st.subheader("📄 Upload File for Embedding")
-        file_to_upload = st.file_uploader("Select a file", type=["pdf", "txt", "docx"])
+        file_to_upload = st.file_uploader("Select a file", type=["pdf", "txt", "docx"], key="upload_file")
 
-        if file_to_upload and st.button("Upload File"):
-            with st.spinner("Uploading and processing file..."):
-                try:
-                    headers = {"Authorization": f"Bearer {st.session_state.token}"}
-                    files = {"file": (file_to_upload.name, file_to_upload, file_to_upload.type)}
-                    
-                    # ✅ Corrected URL with double /tutor prefix
-                    res = requests.post(
-                        f"{API_URL}/tutor/tutor/upload",
-                        files=files,
-                        headers=headers
-                    )
-                    if res.status_code == 200:
-                        data = res.json()
-                        st.success(f"✅ {data['message']}")
-                        st.info(f"Chunks created: {data['num_chunks']}")
-                    else:
-                        st.error(f"❌ Upload failed: {res.text}")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+        if file_to_upload and st.button("Upload File", key="upload_btn"):
+            if not st.session_state.current_user:
+                st.warning("Please log in first!")
+            else:
+                with st.spinner("Uploading and processing file..."):
+                    try:
+                        file_bytes = file_to_upload.read()
+                        file_path = f"{st.session_state.current_user['sub']}/{file_to_upload.name}"
+
+                        asyncio.run(storage_service.upload_file(
+                            bucket="user-files",
+                            file_path=file_path,
+                            file_content=file_bytes,
+                            token=st.session_state.token
+                        ))
+
+                        text = file_processing_service.extract_text_from_pdf(file_bytes)
+                        chunks = file_processing_service.chunk_text(text)
+
+                        asyncio.run(embedding_service.create_and_store_embeddings(
+                            user_id=st.session_state.current_user["sub"],
+                            filename=file_to_upload.name,
+                            file_path=file_path,
+                            chunks=chunks
+                        ))
+
+                        st.success("✅ File uploaded and embeddings stored")
+                        st.info(f"Chunks created: {len(chunks)}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+    # ---------------- LECTURE NOTES TAB ----------------
+    with lecture_tab:
+        st.subheader("📝 Live Lecture Notes")
+        live_audio = st.audio_input("🎤 Record live lecture", key="lecture_audio")
+        uploaded_file = st.file_uploader("Or upload lecture audio", type=["wav", "mp3"], key="lecture_file_upload")
+        # Normalize inputs to raw bytes
+        audio_to_process = None
+        if live_audio is not None:
+            if isinstance(live_audio, (bytes, bytearray, memoryview)):
+                audio_to_process = bytes(live_audio)
+            elif hasattr(live_audio, "read"):
+                audio_to_process = live_audio.read()
+        elif uploaded_file is not None:
+            audio_to_process = uploaded_file.read()
+
+        if audio_to_process and st.button("Generate Notes from Lecture", key="generate_lecture_notes"):
+            if not st.session_state.current_user:
+                st.warning("Please log in first!")
+            else:
+                with st.spinner("Transcribing and generating notes..."):
+                    try:
+                        # Validate bytes before passing downstream
+                        if not isinstance(audio_to_process, (bytes, bytearray, memoryview)) or len(audio_to_process) == 0:
+                            st.error("No valid audio provided for transcription")
+                            st.stop()
+
+                        async def generate_notes():
+                            class MockFile:
+                                def __init__(self, data):
+                                    self._data = bytes(data)
+                                async def read(self):
+                                    return self._data
+                            mock_file = MockFile(audio_to_process)
+                            return await notes_service.generate_from_audio(mock_file)
+
+                        transcript, notes = asyncio.run(generate_notes())
+                        st.session_state.last_transcript = transcript
+                        st.session_state.last_notes = notes
+                        
+                        st.subheader("📝 Transcript")
+                        st.text_area("Transcript", transcript, height=200)
+                        st.subheader("📒 Generated Notes")
+                        st.text_area("Notes", "\n".join(notes), height=200)
+                    except Exception as e:
+                        st.error(f"Error: {e}")
