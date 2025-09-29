@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str 
     COHERE_API_KEY: str
     TTS_ENGINE: str = "gtts"
+    GOOGLE_CLIENT_SECRET_FILE: str 
+    GOOGLE_CALENDAR_SCOPES: str 
+    GOOGLE_CALENDAR_TOKEN_FILE: str 
+
     class Config:
         from_attributes = True
         env_file = ".env"

@@ -22,26 +22,34 @@ async def chat_endpoint(
 ):
     """
     Main chatbot endpoint.
-    Sends the user message into the LangGraph workflow (Cohere orchestrator).
+    Runs the LangGraph workflow, which orchestrates agents
+    (lesson, video, web, rag, calendar, etc.).
     """
-    graph = ChatbotGraph(db).build()  # build the workflow
+    graph = ChatbotGraph(db).build()
 
-    result = await graph.ainvoke(
+    # Run the graph with user message
+    state = await graph.ainvoke(
         {
             "message": request.message,
             "user_id": user["sub"],
         }
     )
 
-    response = result.get("response", "")
-
-    # Ensure response is a string
+    # Extract response (may be str, list, or coroutine)
+    response = state.get("response", "")
     if asyncio.iscoroutine(response):
         response = await response
     if isinstance(response, list):
         response = " ".join(str(r) for r in response)
 
-    return {"response": response}
+    # Optional: expose the orchestrator's decision
+    decision = state.get("next", None)
+
+    return {
+        "response": response,
+        "decision": decision,  # useful for debugging
+        "raw_state": state,    # optional, remove in production if too verbose
+    }
 
 
 @router.get("/history")
@@ -54,9 +62,4 @@ async def chat_history(
     """
     service = ChatbotService(db)
     history = await service.get_history(user_id=user["sub"])
-
-    # Ensure history is JSON-serializable (list of dicts)
-    if history is None:
-        history = []
-
-    return {"history": history}
+    return {"history": history or []}

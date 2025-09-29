@@ -8,7 +8,7 @@ from app.models.chat_history import ChatHistory# 👈 ensures table gets registe
 from app.models.user import User
 from app.core.config import settings
 from app.models.progress import Progress  # 👈 ensures table gets registered
-
+from app.models.calendar_event import CalendarEvent  # 👈 ensures table gets registered
 logging.basicConfig(level=logging.INFO)
 
 def init_db():

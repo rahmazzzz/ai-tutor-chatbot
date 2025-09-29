@@ -56,3 +56,8 @@ class AuthService:
             refresh_token=session.refresh_token,
             user=user_model
         )
+    async def get_profile(self, user_id: str):
+        response = supabase.table("profiles").select("*").eq("id", user_id).execute()
+        if not response.data:
+            return None
+        return response.data[0]
