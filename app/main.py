@@ -9,6 +9,7 @@ from app.routers.voice_routes import router as voice_router
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.routers import voice_routes
+from app.routers import notes_routes
 # --------------------------
 # Database setup
 # --------------------------
@@ -37,6 +38,7 @@ app.add_middleware(
 )
 
 # Routers
+app.include_router(notes_routes.router)
 app.include_router(auth_routes.router)
 app.include_router(tutor_routes.router, prefix="/tutor", tags=["Tutor"])
 app.include_router(chatbot_routes.router)

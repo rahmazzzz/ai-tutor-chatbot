@@ -41,7 +41,15 @@ class ChatbotGraph:
         system_prompt = """
         You are an orchestrator agent.
         Decide which specialist agent should handle the user's request.
-        Respond with ONLY the agent name: video_agent, lesson_agent, web_agent, rag_agent, calendar_agent
+        Respond with ONLY the agent name: video_agent, lesson_agent, web_agent, rag_agent, calendar_agent.
+
+        Routing guidance:
+        - Use rag_agent for general questions, definitions, explanations (e.g., "what is", "explain", "define", "tell me about").
+        - Use lesson_agent only when the user explicitly asks to plan or create a study plan/lessons.
+        - Use video_agent for YouTube links or video requests.
+        - Use web_agent for web search requests.
+        - Use calendar_agent when the user asks to add, put, schedule, or move a plan/task/event into Google Calendar
+          (e.g., "add the plan to my google calendar", "put it on my calendar", "schedule it tomorrow").
         """
         try:
             response = await self.primary_client.chat(user=message, system=system_prompt)
@@ -55,9 +63,42 @@ class ChatbotGraph:
                 logger.error(f"[ChatbotGraph] Fallback LLM failed: {e2}")
                 return "rag_agent"
 
+    def _heuristic_route(self, message: str) -> str | None:
+        """Lightweight intent heuristic to avoid misrouting (e.g., definitions to lesson planning)."""
+        text = (message or "").strip().lower()
+        if not text:
+            return None
+        # General knowledge/definition patterns → rag_agent
+        qa_triggers = [
+            "what is ", "what's ", "whats ", "who is ", "explain ", "define ", "tell me about ",
+            "how does ", "how do ", "why is ", "overview of ", "introduction to "
+        ]
+        if any(trigger in text for trigger in qa_triggers):
+            return "rag_agent"
+
+        # Explicit planning triggers → lesson_agent
+        plan_triggers = ["plan lesson", "lesson plan", "create a study plan", "study plan", "plan a course"]
+        if any(trigger in text for trigger in plan_triggers):
+            return "lesson_agent"
+
+        # Video link patterns → video_agent
+        if "youtube.com" in text or "youtu.be" in text:
+            return "video_agent"
+
+        # Web search intent → web_agent
+        if text.startswith("search ") or text.startswith("google ") or "search the web" in text:
+            return "web_agent"
+
+        # Calendar intent
+        if "add to calendar" in text or "schedule" in text:
+            return "calendar_agent"
+
+        return None
+
     async def orchestrator_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
         message = state["message"]
         user_id = state["user_id"]
+        # Pure LLM routing
         decision = await self._invoke_llm(message)
         if decision not in self.agents:
             decision = "rag_agent"

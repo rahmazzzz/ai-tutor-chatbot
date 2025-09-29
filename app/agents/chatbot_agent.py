@@ -147,7 +147,7 @@ class ChatbotService:
             response = str(response)
         except Exception as e:
             logger.error(f"[ChatbotService] RAG failed: {e}")
-            response = "[RAG ERROR] Unable to fetch response."
+            response = f"I'm sorry, I encountered an error while processing your request: {str(e)}"
 
         self.chat_repo.save_message(user_id, "assistant", response)
         return response
