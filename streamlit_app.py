@@ -1,5 +1,4 @@
 import streamlit as st
-import base64
 import asyncio
 from sqlalchemy.orm import Session
 
@@ -254,6 +253,7 @@ with voice_tab:
         st.subheader("📝 Live Lecture Notes")
         live_audio = st.audio_input("🎤 Record live lecture", key="lecture_audio")
         uploaded_file = st.file_uploader("Or upload lecture audio", type=["wav", "mp3"], key="lecture_file_upload")
+
         # Normalize inputs to raw bytes
         audio_to_process = None
         if live_audio is not None:
