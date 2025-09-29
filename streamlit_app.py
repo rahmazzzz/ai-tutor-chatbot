@@ -7,7 +7,6 @@ from app.container.core_container import container
 from app.services.notes_service import NotesService
 from app.clients.supabase_client import get_db
 from app.agents.chatbot_agent import ChatbotService
-from app.agents.voice_agent import VoiceAgent
 from app.services.voice_service import VoiceService
 from app.graph.langgraph_chatbot import ChatbotGraph
 
@@ -34,9 +33,16 @@ voice_agent_instance = VoiceAgent(db)
 st.set_page_config(page_title="AI Tutor + Voice + Lecture Notes", layout="wide")
 
 # --- Session state initialization ---
-for key in ["token", "messages", "last_transcript", "last_notes", "current_user"]:
+defaults = {
+    "token": None,
+    "messages": [],
+    "last_transcript": None,
+    "last_notes": None,
+    "current_user": None
+}
+for key, default in defaults.items():
     if key not in st.session_state:
-        st.session_state[key] = None if key in ["last_transcript", "last_notes", "current_user"] else []
+        st.session_state[key] = default
 
 st.title("🔐 AI Tutor Auth & Chat")
 
@@ -52,13 +58,11 @@ with tab1:
     if st.button("Login", key="login_btn"):
         try:
             auth_response = asyncio.run(auth_service.login(email=login_email, password=login_password))
-            
             st.session_state.token = auth_response.access_token
             st.session_state.current_user = {
                 "email": auth_response.user.email,
                 "sub": auth_response.user.id
             }
-            
             st.success(f"✅ Logged in successfully as {st.session_state.current_user['email']}")
         except Exception as e:
             st.error(f"❌ Login failed: {e}")
@@ -77,7 +81,6 @@ with tab2:
                 username=reg_username,
                 password=reg_password
             ))
-            
             st.session_state.current_user = {
                 "email": user_out.email,
                 "sub": user_out.id
@@ -97,7 +100,7 @@ if st.session_state.token and st.session_state.current_user:
     # ---------------- CHAT TAB ----------------
     with chat_tab:
         st.subheader("💬 Chat with AI Tutor")
-        
+
         if "messages" not in st.session_state:
             st.session_state.messages = []
 
@@ -113,34 +116,28 @@ if st.session_state.token and st.session_state.current_user:
             with st.spinner("AI Tutor is typing..."):
                 try:
                     user_id = st.session_state.current_user["sub"]
-                    
+
                     async def get_chat_response():
                         # Use the chatbot graph (orchestrator) for general chat
                         result = await chatbot_graph.ainvoke({"message": prompt, "user_id": user_id})
-                        
-                        # Debug: Print the result to understand what's happening
-                        print(f"Chatbot result: {result}")
-                        
                         response_text = result.get("response", "Sorry, I couldn't process that.")
-                        
-                        # Handle different response types
+
+                        # Normalize response type
                         if isinstance(response_text, list):
                             response_text = " ".join(str(r) for r in response_text)
                         elif isinstance(response_text, dict):
                             response_text = str(response_text)
-                        
                         return response_text
-                    
+
                     response_text = asyncio.run(get_chat_response())
                     st.session_state.messages.append(("assistant", response_text))
                     st.chat_message("assistant").markdown(response_text)
 
                 except Exception as e:
-                    # Try fallback to simple RAG service
                     try:
                         async def fallback_chat():
                             return await rag_service.chat(prompt, user_id)
-                        
+
                         fallback_response = asyncio.run(fallback_chat())
                         st.session_state.messages.append(("assistant", fallback_response))
                         st.chat_message("assistant").markdown(fallback_response)
@@ -149,68 +146,52 @@ if st.session_state.token and st.session_state.current_user:
                         st.session_state.messages.append(("assistant", fallback_msg))
                         st.chat_message("assistant").markdown(fallback_msg)
 
-   # ---------------- VOICE TAB ----------------
-# ---------------- VOICE TAB ----------------
-with voice_tab:
-    st.subheader("🎙️ Voice Interaction")
-    audio_upload = st.audio_input("🎤 Record your voice", key="voice_record")
-    uploaded_file = st.file_uploader("Or upload a voice file", type=["wav", "mp3"], key="voice_file")
+    # ---------------- VOICE TAB ----------------
+    with voice_tab:
+        st.subheader("🎙️ Voice Interaction")
+        audio_upload = st.audio_input("🎤 Record your voice", key="voice_record")
+        uploaded_file = st.file_uploader("Or upload a voice file", type=["wav", "mp3"], key="voice_file")
 
-    if (audio_upload or uploaded_file) and st.button("Send Voice", key="voice_send"):
-        if not st.session_state.current_user:
-            st.warning("Please log in first!")
-        else:
-            with st.spinner("Processing voice..."):
-                try:
-                    # Handle different audio input types → convert to raw bytes
-                    audio_bytes = None
-                    file_name = None
-
-                    if audio_upload is not None:
-                        # st.audio_input may return bytes-like or UploadedFile
-                        if isinstance(audio_upload, (bytes, bytearray, memoryview)):
-                            audio_bytes = bytes(audio_upload)
-                        elif hasattr(audio_upload, "read"):
-                            audio_bytes = audio_upload.read()
-                        else:
-                            audio_bytes = None
-                        file_name = "recorded_audio.wav"
-                    elif uploaded_file is not None:
-                        # st.file_uploader returns UploadedFile
-                        audio_bytes = uploaded_file.read()
-                        file_name = getattr(uploaded_file, "name", "uploaded_audio")
-
-                    # Ensure we have valid audio bytes
-                    if not isinstance(audio_bytes, (bytes, bytearray, memoryview)) or len(audio_bytes) == 0:
-                        st.error("No valid audio input provided")
-                        st.stop()
-
-                    # Optional info after ensuring bytes
+        if (audio_upload or uploaded_file) and st.button("Send Voice", key="voice_send"):
+            if not st.session_state.current_user:
+                st.warning("Please log in first!")
+            else:
+                with st.spinner("Processing voice..."):
                     try:
-                        st.info(f"Using audio: {file_name or 'audio'} ({len(audio_bytes)} bytes)")
-                    except Exception:
-                        pass
+                        audio_bytes = None
+                        file_name = None
 
-                    user_id = st.session_state.current_user["sub"]
+                        if audio_upload is not None:
+                            if isinstance(audio_upload, (bytes, bytearray, memoryview)):
+                                audio_bytes = bytes(audio_upload)
+                            elif hasattr(audio_upload, "read"):
+                                audio_bytes = audio_upload.read()
+                            file_name = "recorded_audio.wav"
+                        elif uploaded_file is not None:
+                            audio_bytes = uploaded_file.read()
+                            file_name = getattr(uploaded_file, "name", "uploaded_audio")
 
-                    async def process_voice():
-                        return await voice_agent_instance.handle_audio(bytes(audio_bytes), user_id)
+                        if not isinstance(audio_bytes, (bytes, bytearray, memoryview)) or len(audio_bytes) == 0:
+                            st.error("No valid audio input provided")
+                            st.stop()
 
-                    # Run async agent
-                    result = asyncio.run(process_voice())
-                    transcript = result["text"]
-                    st.session_state.last_transcript = transcript
+                        user_id = st.session_state.current_user["sub"]
 
-                    # Show AI text response
-                    st.subheader("📝 AI Response")
-                    st.write(transcript)
+                        async def process_voice():
+                            return await voice_agent_instance.handle_audio(bytes(audio_bytes), user_id)
 
-                    # Play AI voice reply (already bytes)
-                    st.subheader("🔊 AI Voice Reply")
-                    st.audio(result["audio"], format="audio/wav")
+                        result = asyncio.run(process_voice())
+                        transcript = result["text"]
+                        st.session_state.last_transcript = transcript
 
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                        st.subheader("📝 AI Response")
+                        st.write(transcript)
+
+                        st.subheader("🔊 AI Voice Reply")
+                        st.audio(result["audio"], format="audio/wav")
+
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
     # ---------------- UPLOAD TAB ----------------
     with upload_tab:
@@ -252,17 +233,16 @@ with voice_tab:
     with lecture_tab:
         st.subheader("📝 Live Lecture Notes")
         live_audio = st.audio_input("🎤 Record live lecture", key="lecture_audio")
-        uploaded_file = st.file_uploader("Or upload lecture audio", type=["wav", "mp3"], key="lecture_file_upload")
+        lecture_uploaded_file = st.file_uploader("Or upload lecture audio", type=["wav", "mp3"], key="lecture_file_upload")
 
-        # Normalize inputs to raw bytes
         audio_to_process = None
         if live_audio is not None:
             if isinstance(live_audio, (bytes, bytearray, memoryview)):
                 audio_to_process = bytes(live_audio)
             elif hasattr(live_audio, "read"):
                 audio_to_process = live_audio.read()
-        elif uploaded_file is not None:
-            audio_to_process = uploaded_file.read()
+        elif lecture_uploaded_file is not None:
+            audio_to_process = lecture_uploaded_file.read()
 
         if audio_to_process and st.button("Generate Notes from Lecture", key="generate_lecture_notes"):
             if not st.session_state.current_user:
@@ -270,7 +250,6 @@ with voice_tab:
             else:
                 with st.spinner("Transcribing and generating notes..."):
                     try:
-                        # Validate bytes before passing downstream
                         if not isinstance(audio_to_process, (bytes, bytearray, memoryview)) or len(audio_to_process) == 0:
                             st.error("No valid audio provided for transcription")
                             st.stop()
@@ -287,7 +266,7 @@ with voice_tab:
                         transcript, notes = asyncio.run(generate_notes())
                         st.session_state.last_transcript = transcript
                         st.session_state.last_notes = notes
-                        
+
                         st.subheader("📝 Transcript")
                         st.text_area("Transcript", transcript, height=200)
                         st.subheader("📒 Generated Notes")
