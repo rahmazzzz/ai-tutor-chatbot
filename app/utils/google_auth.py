@@ -1,55 +1,41 @@
 # app/utils/google_auth.py
-
-import streamlit as st
+import os
+import pickle
+import json
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-import pickle
-import os
-from pathlib import Path
+import streamlit as st
 
-# Load Google settings from Streamlit secrets
-GOOGLE_SECRETS = st.secrets["google"]
-
-SCOPES = [GOOGLE_SECRETS["scopes"]]
-
-# Paths for storing token (locally only – Streamlit Cloud restarts containers so sessions reset)
-TOKEN_PATH = Path("google_token.pickle")
-
+# Load secrets from Streamlit
+secrets = st.secrets
+SCOPES = secrets["GOOGLE_CALENDAR_SCOPES"].split(",")
+CREDS_JSON = secrets["GOOGLE_CLIENT_SECRET_FILE_JSON"]  # Store the JSON content itself in secrets
 
 def get_google_credentials():
     creds = None
 
-    # Try to load existing token
-    if TOKEN_PATH.exists():
-        with open(TOKEN_PATH, "rb") as token:
-            creds = pickle.load(token)
+    # Load token from Streamlit secrets if it exists
+    if "GOOGLE_CALENDAR_TOKEN" in st.secrets:
+        token_bytes = st.secrets["GOOGLE_CALENDAR_TOKEN"].encode()
+        creds = pickle.loads(token_bytes)
 
-    # If no creds or expired, start OAuth flow
+    # If no valid credentials, run OAuth flow
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # Build InstalledAppFlow from secrets directly (no file needed)
-            flow = InstalledAppFlow.from_client_config(
-                {
-                    "installed": {
-                        "client_id": GOOGLE_SECRETS["client_id"],
-                        "project_id": GOOGLE_SECRETS["project_id"],
-                        "auth_uri": GOOGLE_SECRETS["auth_uri"],
-                        "token_uri": GOOGLE_SECRETS["token_uri"],
-                        "auth_provider_x509_cert_url": GOOGLE_SECRETS[
-                            "auth_provider_x509_cert_url"
-                        ],
-                        "client_secret": GOOGLE_SECRETS["client_secret"],
-                        "redirect_uris": GOOGLE_SECRETS["redirect_uris"],
-                    }
-                },
-                SCOPES,
-            )
+            # Write client secret JSON to temporary file
+            with open("temp_credentials.json", "w") as f:
+                json.dump(CREDS_JSON, f)
+
+            flow = InstalledAppFlow.from_client_secrets_file("temp_credentials.json", SCOPES)
             creds = flow.run_local_server(port=0)
 
-        # Save token locally (may not persist on Streamlit Cloud between sessions)
-        with open(TOKEN_PATH, "wb") as token:
-            pickle.dump(creds, token)
+            os.remove("temp_credentials.json")  # remove temp file
+
+        # Store token in Streamlit secrets for future use (manual copy)
+        st.write("⚠️ Copy this token to your Streamlit secrets under 'GOOGLE_CALENDAR_TOKEN'")
+        token_bytes = pickle.dumps(creds)
+        st.write(token_bytes.decode("latin1"))
 
     return creds
