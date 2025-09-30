@@ -1,7 +1,6 @@
 # app/agents/chatbot_agent.py
 import re
 from typing import Any, Dict
-from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 import asyncio
 import logging
@@ -12,8 +11,6 @@ from app.services.rag_service import RAGService
 from app.services.sql_rag_service import SQLRAGService
 from app.agents.advanced_search_agent import LessonPlannerAgent
 from app.agents.advanced_lesson_planner_agent import AdvancedLessonPlannerAgent
-from app.agents.plan_calender_agent import PlanCalendarAgent
-from app.services.google_calendar_service import GoogleCalendarService
 from app.utils.web_search import search_web
 from app.utils.youtube_search import YouTubeSearch
 from app.repositories.chat_history_repository import ChatHistoryRepository
@@ -39,16 +36,7 @@ class ChatbotService:
         self.advanced_planner = AdvancedLessonPlannerAgent()
 
         # --- Core dependencies ---
-        llm_client = MistralChatClient()
-        google_calendar = GoogleCalendarService()
-
-        # --- Calendar Agent (fixed initialization) ---
-        self.plan_calendar_agent = PlanCalendarAgent(
-            llm=llm_client,
-            chat_repo=self.chat_repo,  # pass ChatHistoryRepository instance
-            google_calendar=google_calendar,
-        )
-        self.calendar_service = google_calendar
+        self.llm_client = MistralChatClient()
 
         # --- RAG services ---
         self.rag_service = RAGService(db=db)
@@ -84,44 +72,6 @@ class ChatbotService:
         except Exception as e:
             logger.error(f"[ChatbotService] plan_lesson failed: {e}")
             return {"error": str(e)}
-
-    async def add_plan_to_calendar(self, user_id: str) -> Dict[str, Any]:
-        self.chat_repo.save_message(user_id, "user", "Add plan to Google Calendar")
-
-        try:
-            last_plan = self.chat_repo.get_last_plan(user_id)
-            if not last_plan:
-                return {"success": False, "error": "No existing plan found to add to calendar."}
-
-            # Default times if none specified
-            start_time = datetime.utcnow() + timedelta(minutes=5)
-            end_time = start_time + timedelta(hours=1)
-
-            event_data = {
-                "title": "Lesson Plan",
-                "description": str(last_plan),
-                "start_time": start_time,
-                "end_time": end_time,
-            }
-
-            google_event_id = self.calendar_service.create_event(event_data)
-            self.chat_repo.save_message(user_id, "assistant", "Plan added to Google Calendar ✅")
-
-            return {"success": True, "google_event_id": google_event_id, "plan_text": str(last_plan)}
-        except Exception as e:
-            logger.error(f"[ChatbotService] add_plan_to_calendar failed: {e}")
-            return {"success": False, "error": str(e)}
-
-    async def mark_task_done(self, user_id: str, event_id: str) -> Dict[str, Any]:
-        try:
-            result = await self.plan_calendar_agent.mark_task_done(user_id, event_id)
-            if isinstance(result, dict) and result.get("success"):
-                return result
-            logger.error(f"[calendar_agent] Unexpected result format: {result}")
-            return {"success": False, "error": "Unexpected result format"}
-        except Exception as e:
-            logger.error(f"[ChatbotService] mark_task_done failed: {e}")
-            return {"success": False, "error": str(e)}
 
     async def web_search(self, user_id: str, message: str) -> Dict[str, Any]:
         query = message.replace("search web", "").strip()
@@ -177,8 +127,5 @@ class ChatbotService:
     async def handle_user_message(self, user_id: str, message: str) -> Dict[str, Any]:
         if "plan lesson" in message.lower() or "lesson plan" in message.lower():
             return await self.plan_lesson(user_id, message)
-        elif "add to calendar" in message.lower() or "schedule plan" in message.lower():
-            return await self.add_plan_to_calendar(user_id)
         else:
             return {"success": False, "info": "Message received, but no action matched."}
-

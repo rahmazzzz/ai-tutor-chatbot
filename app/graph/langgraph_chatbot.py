@@ -7,9 +7,7 @@ from app.clients.cohere_client import CohereClient
 from app.core.config import settings
 from app.utils.web_search import search_web
 from app.utils.youtube_search import YouTubeSearch
-import asyncio
 import logging
-import json
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -34,22 +32,19 @@ class ChatbotGraph:
             "lesson_agent",
             "web_agent",
             "rag_agent",
-            "calendar_agent"
         ]
 
     async def _invoke_llm(self, message: str) -> str:
         system_prompt = """
         You are an orchestrator agent.
         Decide which specialist agent should handle the user's request.
-        Respond with ONLY the agent name: video_agent, lesson_agent, web_agent, rag_agent, calendar_agent.
+        Respond with ONLY the agent name: video_agent, lesson_agent, web_agent, rag_agent.
 
         Routing guidance:
         - Use rag_agent for general questions, definitions, explanations (e.g., "what is", "explain", "define", "tell me about").
         - Use lesson_agent only when the user explicitly asks to plan or create a study plan/lessons.
         - Use video_agent for YouTube links or video requests.
         - Use web_agent for web search requests.
-        - Use calendar_agent when the user asks to add, put, schedule, or move a plan/task/event into Google Calendar
-          (e.g., "add the plan to my google calendar", "put it on my calendar", "schedule it tomorrow").
         """
         try:
             response = await self.primary_client.chat(user=message, system=system_prompt)
@@ -89,10 +84,6 @@ class ChatbotGraph:
         if text.startswith("search ") or text.startswith("google ") or "search the web" in text:
             return "web_agent"
 
-        # Calendar intent
-        if "add to calendar" in text or "schedule" in text:
-            return "calendar_agent"
-
         return None
 
     async def orchestrator_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -127,27 +118,6 @@ class ChatbotGraph:
     async def rag_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
         return {"response": await self.service.rag_response(state["user_id"], state["message"])}
 
-    async def calendar_agent(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Add the last generated plan to Google Calendar for the user."""
-        user_id = state["user_id"]
-
-        # Fetch last plan from ChatHistory
-        last_plan = await asyncio.to_thread(self.service.chat_repo.get_last_plan, user_id)
-        if not last_plan:
-            return {"response": "No lesson plan found to add to your calendar."}
-
-        # Store plan in Google Calendar via PlanCalendarAgent
-        try:
-            result = await self.service.plan_calendar_agent.store_plan(user_id, last_plan)
-            if isinstance(result, list):
-                return {"response": f"Added {len(result)} events to your Google Calendar!"}
-            else:
-                logger.error(f"[calendar_agent] Unexpected result format: {result}")
-                return {"response": f"Failed to add events: {result}"}
-        except Exception as e:
-            logger.error(f"[calendar_agent] Error storing plan: {e}", exc_info=True)
-            return {"response": f"Failed to add events due to an error."}
-
     # --- Build LangGraph workflow ---
     def build(self):
         workflow = StateGraph(dict)
@@ -156,7 +126,6 @@ class ChatbotGraph:
         workflow.add_node("lesson_agent", self.lesson_agent)
         workflow.add_node("web_agent", self.web_agent)
         workflow.add_node("rag_agent", self.rag_agent)
-        workflow.add_node("calendar_agent", self.calendar_agent)
 
         workflow.add_edge(START, "orchestrator")
         workflow.add_conditional_edges(
@@ -169,6 +138,5 @@ class ChatbotGraph:
         workflow.add_edge("lesson_agent", END)
         workflow.add_edge("web_agent", END)
         workflow.add_edge("rag_agent", END)
-        workflow.add_edge("calendar_agent", END)
 
         return workflow.compile()
