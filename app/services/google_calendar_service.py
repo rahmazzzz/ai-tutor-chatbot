@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-
+creds = get_google_credentials()
 class GoogleCalendarService:
     def __init__(self):
         creds = get_google_credentials()
