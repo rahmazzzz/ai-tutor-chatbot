@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     MISTRAL_API_KEY: str
     TAVILY_API_KEY: str = None
     MISTRAL_MODEL: str = "magistral-medium-2507"
-    MISTRAL_TEMPERATURE: float = 0.7 
+    MISTRAL_TEMPERATURE = 0.7 
     GEMINI_API_KEY: str 
     COHERE_API_KEY: str
     TTS_ENGINE: str = "gtts"

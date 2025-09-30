@@ -13,10 +13,12 @@ from app.routers import notes_routes
 # --------------------------
 # Database setup
 # --------------------------
-DATABASE_URL = f"postgresql://postgres:{settings.SUPABASE_KEY}@{settings.SUPABASE_URL.split('//')[1]}/postgres"
+DATABASE_URL = settings.SUPABASE_DB_URL
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+def init_db():
+    Base.metadata.create_all(bind=engine)
 def init_db():
     Base.metadata.create_all(bind=engine)
 
