@@ -28,7 +28,7 @@ def get_google_credentials():
                 json.dump(json.loads(CREDS_JSON), f)
 
             flow = InstalledAppFlow.from_client_secrets_file("temp_credentials.json", SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = flow.run_console()
 
             os.remove("temp_credentials.json")  # cleanup
 
